@@ -9,6 +9,8 @@ langchain-chroma
 langgraph
 langgraph-checkpoint-sqlite
 pydantic-settings 
+fastapi
+uvicorn[standard]
 python-dotenv
 streamlit
 rich
