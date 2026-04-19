@@ -1,21 +1,8 @@
-from langchain_core.prompts import ChatPromptTemplate
-
 from src.agents.base_agent import BaseAgent
 from src.models.schemas import Architecture
 from src.pipelines.state import SDLCState
 from src.tools.llm_factory import LLMFactory
-
-ARCHITECT_PROMPT = ChatPromptTemplate.from_messages([
-    ('system',
-     'You are a senior software architect. Given product requirements, design '
-     'a minimal Python project: FastAPI + Pydantic + pytest. Keep it to 5-10 '
-     'files MAX. Every file must have a clear, single purpose. Include a '
-     'tests/ directory.'),
-    ('human',
-     'Requirements:\n{requirements}\n\n'
-     'Previous feedback (if any): {feedback}\n\n'
-     'Produce the structured Architecture object.')
-])
+from src.prompts.architect_prompt import ARCHITECT_PROMPT
 
 class ArchitectAgent(BaseAgent):
     name = 'architect_agent'
