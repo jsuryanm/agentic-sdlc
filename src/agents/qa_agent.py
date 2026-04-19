@@ -15,7 +15,13 @@ class QAAgent(BaseAgent):
 
     name = "qa_agent"
 
-    def _process(self,state: SDLCState):
+    def _process(self, state: SDLCState):
+        if not state.get("codebase"):
+            return {
+                "test_report": {"status": "fail", "errors": ["Developer agent produced no codebase"], "passed": 0, "failed": 0, "raw_output": ""},
+                "qa_retries": 0,
+                "status": "qa_fail",
+            }
         project_dir = Path(state["codebase"]["project_dir"])
         runner = TestRunner(project_dir)
 

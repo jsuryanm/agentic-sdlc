@@ -37,6 +37,9 @@ class GitHubMCPClient:
     def load_tools_sync(self) -> List:
         return asyncio.run(self._load_tools())
 
+    async def get_tools(self) -> List:
+        return await self._load_tools()
+
 # if __name__ == "__main__":
 #     client = GitHubMCPClient()
 #     mcp_tools = client.load_tools_sync() 

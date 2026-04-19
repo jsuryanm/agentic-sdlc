@@ -29,7 +29,7 @@ def initial_state(idea: str, thread_id: str) -> SDLCState:
         test_report=None,
         deployment=None,
         feedback=[],
-        qa_retires=0,
+        qa_retries=0,
         errors=[],
         status='initialized'
     )

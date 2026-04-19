@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Config(BaseSettings):
     # LLM
     OPENAI_API_KEY: str = Field(default="")
-    LLM_MODEL: str = Field(default="openai:gpt-4o-mini")
+    LLM_MODEL: str = Field(default="gpt-4o-mini")
     LLM_TEMPERATURE: float = Field(default=0.2, ge=0, le=1)
     LLM_MAX_TOKENS: int = Field(default=2000)
 

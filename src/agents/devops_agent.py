@@ -1,4 +1,5 @@
-from pathlib import Path 
+import asyncio
+from pathlib import Path
 
 from langchain.agents import create_agent
 
@@ -58,32 +59,40 @@ class DevOpsAgent(BaseAgent):
                       project_dir: Path,
                       branch: str,
                       project_name: str) -> str | None:
-        """Use GitHub MCP tools via a create_agent call to push the project."""
+        """Sync wrapper. Uses one asyncio.run() for the whole MCP interaction."""
         try:
-            tools = GitHubMCPClient().load_tools_sync()
-            agent = create_agent(LLMFactory.get(),tools)
-
-            files_listing = self._collect_files(project_dir)
-            prompt = (
-                f"Commit these files to repo {settings.GITHUB_REPO_OWNER}/"
-                f"{settings.GITHUB_REPO_NAME} on a new branch '{branch}' "
-                f"(base: main). Then open a pull request titled "
-                f"'Agentic SDLC: {project_name}' with a short description.\n\n"
-                f"Files:\n{files_listing}"
-            )
-
-            result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
-
-            last = result["messages"][-1].content if result.get("messages") else ""
-            if isinstance(last, str) and "pull/" in last:
-                # crude extraction; fine for demo
-                import re
-                m = re.search(r"https://github\.com/\S+/pull/\d+", last)
-                if m: return m.group(0)
-            return None
+            return asyncio.run(self._push_via_mcp_async(project_dir, branch, project_name))
         except Exception as e:
             self.logger.warning(f"MCP push failed (non-fatal for demo): {e}")
             return None
+
+    async def _push_via_mcp_async(self,
+                                  project_dir: Path,
+                                  branch: str,
+                                  project_name: str) -> str | None:
+        tools = await GitHubMCPClient().get_tools()
+        agent = create_agent(LLMFactory.get(), tools)
+
+        files_listing = self._collect_files(project_dir)
+        prompt = (
+            f"Commit these files to repo {settings.GITHUB_REPO_OWNER}/"
+            f"{settings.GITHUB_REPO_NAME} on a new branch '{branch}' "
+            f"(base: main). Then open a pull request titled "
+            f"'Agentic SDLC: {project_name}' with a short description.\n\n"
+            f"Files:\n{files_listing}"
+        )
+
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": prompt}]}
+        )
+
+        last = result["messages"][-1].content if result.get("messages") else ""
+        if isinstance(last, str) and "pull/" in last:
+            import re
+            m = re.search(r"https://github\.com/\S+/pull/\d+", last)
+            if m:
+                return m.group(0)
+        return None
     
     @staticmethod
     def _collect_files(project_dir: Path) -> str:

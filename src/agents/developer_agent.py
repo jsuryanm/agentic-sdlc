@@ -24,11 +24,11 @@ class DeveloperAgent(BaseAgent):
 
         project_name = state['requirements'].get('project_name', 'sdlc-app')
         project_dir = settings.WORKSPACE_DIR / project_name
-        project_dir.mkdir(parents=True, exists_ok=True)
+        project_dir.mkdir(parents=True, exist_ok=True)
 
         for f in result.files:
             abs_path = project_dir / f.path
-            abs_path.parent.mkdir(parents=True, exists_ok=True)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
             abs_path.write_text(f.content, encoding='utf-8')
 
         self.logger.info(f'Wrote {len(result.files)} files to {project_dir}')

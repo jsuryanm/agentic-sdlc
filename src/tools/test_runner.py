@@ -20,7 +20,7 @@ class TestRunner:
 
         try:
             result = subprocess.run(
-                args=["python","-m","-q","--tb=short"],
+                args=["python","-m","pytest","-q","--tb=short"],
                 cwd=str(self.workspace), # runs inside the workspace
                 capture_output=True, # captures stdout and stderr
                 text=True, # returns text
@@ -49,7 +49,7 @@ class TestRunner:
         report = TestReport(status=status,
                             passed=passed,
                             failed=failed,
-                            errors=[output[-1500:] if status != TestStatus.PASS else []],
+                            errors=[output[-1500:]] if status != TestStatus.PASS else [],
                             raw_output=output[-4000:])
         log.info(f"Test result: {status.value} ({passed} passed, {failed} failed)")
         return report 
@@ -57,7 +57,7 @@ class TestRunner:
     @staticmethod
     def _parse_counts(output: str) -> tuple[int,int]:
         import re
-        passed,failed = 0
+        passed, failed = 0, 0
         m = re.search(r"(\d+) passed", output)
         if m: passed = int(m.group(1))
         m = re.search(r"(\d+) failed", output)

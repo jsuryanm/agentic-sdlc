@@ -47,7 +47,7 @@ def _make_hitl_node(phase: str, preview_key: str):
     
     return hitl_node
 
-hitl_requirements = _make_hitl_node('requirements', 'requirments')
+hitl_requirements = _make_hitl_node('requirements', 'requirements')
 hitl_architecture = _make_hitl_node('architecture', 'architecture')
 hitl_deploy = _make_hitl_node('deployment', 'deployment')
 
@@ -60,7 +60,7 @@ def route_after_hitl_arch(state: SDLCState) -> str:
     return 'developer' if last['verdict'] == 'approve' else 'architect'
 
 def route_after_qa(state: SDLCState) -> str:
-    report = state.get('test_report', {})
+    report = state.get('test_report') or {}
     if report.get('status') == 'pass':
         return 'devops'
     if state.get('qa_retries', 0) >= settings.MAX_QA_RETRIES:
@@ -84,7 +84,7 @@ def build_graph(checkpointer):
     g.add_node('hitl_deploy', hitl_deploy)
 
     g.add_edge(START, 'requirement')
-    g.add_edge('requirment', 'hitl_req')
+    g.add_edge('requirement', 'hitl_req')
     g.add_conditional_edges('hitl_req', route_after_hitl_req,
                             {'architect': 'architect', 'requirement': 'requirement'})
     g.add_edge('architect', 'hitl_arch')
