@@ -1,10 +1,9 @@
-name: CI Workflow
+name: CI
 
 on:
   push:
     branches:
       - main
-      - feature/*
   pull_request:
     branches:
       - main
@@ -33,4 +32,4 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t fastapi-todo-api .
+        docker build -t todo-api .

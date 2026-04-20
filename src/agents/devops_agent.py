@@ -1,107 +1,199 @@
 import asyncio
+import time
+import re
 from pathlib import Path
+from typing import List, Optional, Dict, Any
 
-from langchain.agents import create_agent
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from src.agents.base_agent import BaseAgent
 from src.core.config import settings
 from src.models.schemas import DeploymentArtifacts
 from src.pipelines.state import SDLCState
 from src.tools.llm_factory import LLMFactory
-from src.tools.mcp_client import GitHubMCPClient
 from src.prompts.devops_prompt import DEVOPS_PROMPT
 
-class DeploymentPlan(DeploymentArtifacts):
-    """Internal — just the artifacts, PR URL filled in after MCP call."""
-    pass 
 
 class DevOpsAgent(BaseAgent):
-    """Generates Dockerfile + CI yaml, writes them into the project, then uses
-    GitHub MCP to commit the whole project on a feature branch and open a PR."""
+    name = "devops_agent"
 
     def __init__(self):
         super().__init__()
-        self._chain = (DEVOPS_PROMPT 
-                       | LLMFactory.get().with_structured_output(DeploymentArtifacts))
+        self._chain = (
+            DEVOPS_PROMPT
+            | LLMFactory.get().with_structured_output(DeploymentArtifacts)
+        )
 
-    def _process(self,state: SDLCState) -> dict:
+    def _process(self, state: SDLCState) -> dict:
         arch = state["architecture"]
         reqs = state["requirements"]
         project_dir = Path(state["codebase"]["project_dir"])
 
-        plan: DeploymentPlan = self._chain.invoke({
-            "project_name":reqs["project_name"],
-            "entry_point":arch["entry_point"],
-            "stack":arch["stack"]
+        # Generate deployment artifacts (Dockerfile, CI/CD YAML)
+        plan = self._chain.invoke({
+            "project_name": reqs["project_name"],
+            "entry_point": arch["entry_point"],
+            "stack": arch["stack"],
         })
 
-        # saves dockerfile 
-        (project_dir / "Dockerfile").write_text(plan.dockerfile,encoding="utf-8")
-        
+        # 1. Sync generated files to local disk
+        (project_dir / "Dockerfile").write_text(plan.dockerfile, encoding="utf-8")
         ci_dir = project_dir / ".github" / "workflows"
-        ci_dir.mkdir(parents=True,exist_ok=True)
-        (ci_dir/"ci.yml").write_text(plan.ci_yaml,encoding="utf-8")
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        (ci_dir / "ci.yml").write_text(plan.ci_yaml, encoding="utf-8")
 
-        self.logger.info(f"Wrote Dockerfile and CI to {project_dir}")
+        self.logger.info(f"Artifacts prepared in {project_dir}")
 
-        pr_url = self._push_via_mcp(project_dir, plan.branch_name, reqs["project_name"])
+        # 2. Setup unique branch to ensure a blank slate every run
+        unique_branch = f"deploy-{int(time.time())}"
+        
+        # 3. Execute MCP Push and PR creation
+        pr_url = self._run_async(self._push_via_mcp(project_dir, unique_branch, reqs["project_name"]))
 
         return {
-            "deployment":{
-                **plan.model_dump(),
-                "pr_url":pr_url,
-                "project_url":str(project_dir)},
-            
-            "status":"deployment_ready" 
+            "deployment": {
+                **plan.model_dump(), 
+                "branch_name": unique_branch,
+                "pr_url": pr_url, 
+                "project_dir": str(project_dir)
+            },
+            "status": "deployment_ready",
         }
-    
-    def _push_via_mcp(self,
-                      project_dir: Path,
-                      branch: str,
-                      project_name: str) -> str | None:
-        """Sync wrapper. Uses one asyncio.run() for the whole MCP interaction."""
+
+    def _run_async(self, coro):
+        """Helper to safely manage the async event loop in a sync context."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            return asyncio.run(self._push_via_mcp_async(project_dir, branch, project_name))
-        except Exception as e:
-            self.logger.warning(f"MCP push failed (non-fatal for demo): {e}")
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    async def _push_via_mcp(self, project_dir: Path, branch: str, project_name: str) -> Optional[str]:
+        try:
+            client = MultiServerMCPClient({
+                "github": {
+                    "transport": "streamable_http",
+                    "url": settings.GITHUB_MCP_URL,
+                    "headers": {"Authorization": f"Bearer {settings.GITHUB_PERSONAL_ACCESS_TOKEN}"},
+                }
+            })
+            tools = await client.get_tools()
+            owner, repo = settings.GITHUB_REPO_OWNER, settings.GITHUB_REPO_NAME
+
+            # --- STRICT TOOL MAPPING ---
+            # Mapping names exactly to avoid 'update_pull_request' (which causes pullNumber errors)
+            tool_map = {t.name: t for t in tools}
+            
+            commit_tool = tool_map.get("create_or_update_file")
+            branch_tool = tool_map.get("create_branch")
+            pr_tool = tool_map.get("create_pull_request")
+            get_contents_tool = tool_map.get("get_file_contents")
+
+            if not all([commit_tool, branch_tool, pr_tool]):
+                self.logger.error("Missing critical GitHub tools in MCP toolset.")
+                return None
+
+            # 1. Create the new isolated branch
+            await branch_tool.ainvoke({"owner": owner, "repo": repo, "branch": branch, "base": "main"})
+            self.logger.info(f"Created isolated branch: {branch}")
+
+            # 2. Collect and push ALL files (app logic + requirements + devops files)
+            files_to_push = self._collect_all_files(project_dir)
+            pushed_count = 0
+            
+            for f in files_to_push:
+                path = f["path"]
+                # Resolve SHA from main if file already exists in repository
+                sha = await self._resolve_sha(get_contents_tool, owner, repo, path, ["main"])
+                
+                try:
+                    await commit_tool.ainvoke({
+                        "owner": owner, "repo": repo, 
+                        "path": path,
+                        "content": f["content"], 
+                        "branch": branch,
+                        "message": f"SDLC Automator: Adding {path}",
+                        **({"sha": sha} if sha else {})
+                    })
+                    pushed_count += 1
+                    self.logger.info(f"Successfully pushed: {path}")
+                except Exception as e:
+                    self.logger.error(f"Failed to push {path}: {e}")
+
+            # 3. Create the Pull Request and extract ONLY the URL
+            if pushed_count > 0:
+                try:
+                    self.logger.info(f"Opening Pull Request for {branch}...")
+                    pr_result = await pr_tool.ainvoke({
+                        "owner": owner, "repo": repo, 
+                        "title": f"SDLC Deployment: {project_name}",
+                        "body": "Automated deployment PR with code and CI/CD artifacts.",
+                        "head": branch, 
+                        "base": "main"
+                    })
+                    
+                    # Ensure we only return a clean string URL
+                    clean_url = self._extract_url(pr_result)
+                    if clean_url:
+                        self.logger.info(f"🚀 PR CREATED: {clean_url}")
+                        return clean_url
+                        
+                except Exception as pr_e:
+                    self.logger.error(f"PR Creation Failed: {pr_e}")
+
             return None
 
-    async def _push_via_mcp_async(self,
-                                  project_dir: Path,
-                                  branch: str,
-                                  project_name: str) -> str | None:
-        tools = await GitHubMCPClient().get_tools()
-        agent = create_agent(LLMFactory.get(), tools)
+        except Exception as e:
+            self.logger.error(f"Global MCP Workflow Error: {e}")
+            return None
 
-        files_listing = self._collect_files(project_dir)
-        prompt = (
-            f"Commit these files to repo {settings.GITHUB_REPO_OWNER}/"
-            f"{settings.GITHUB_REPO_NAME} on a new branch '{branch}' "
-            f"(base: main). Then open a pull request titled "
-            f"'Agentic SDLC: {project_name}' with a short description.\n\n"
-            f"Files:\n{files_listing}"
-        )
+    def _collect_all_files(self, project_dir: Path) -> List[Dict[str, str]]:
+        """Scans directory and captures everything not explicitly ignored."""
+        files = []
+        exclude = {".git", "__pycache__", "venv", ".venv", ".DS_Store", ".pytest_cache"}
+        for p in project_dir.rglob("*"):
+            if p.is_file() and not any(x in p.parts for x in exclude):
+                try:
+                    files.append({
+                        "path": p.relative_to(project_dir).as_posix(),
+                        "content": p.read_text(encoding="utf-8", errors="replace")
+                    })
+                except Exception as e:
+                    self.logger.warning(f"Skipping unreadable file {p}: {e}")
+        return files
 
-        result = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": prompt}]}
-        )
-
-        last = result["messages"][-1].content if result.get("messages") else ""
-        if isinstance(last, str) and "pull/" in last:
-            import re
-            m = re.search(r"https://github\.com/\S+/pull/\d+", last)
-            if m:
-                return m.group(0)
+    async def _resolve_sha(self, tool, owner, repo, path, refs):
+        """Fetches the SHA of a file if it exists in the specified git references."""
+        if not tool: return None
+        for ref in refs:
+            try:
+                res = await tool.ainvoke({"owner": owner, "repo": repo, "path": path, "ref": ref})
+                if isinstance(res, dict): return res.get("sha")
+                return getattr(res, "sha", None)
+            except: continue
         return None
-    
-    @staticmethod
-    def _collect_files(project_dir: Path) -> str:
-        lines = []
 
-        for p in sorted(project_dir.rglob("*")):
-            if p.is_file() and ".git" not in p.parts:
-                # ignore git folder
-                rel = p.relative_to(project_dir) # relative path
-                content = p.read_text(encoding="utf-8", errors="ignore")
-                lines.append(f"--- {rel} ---\n{content[:4000]}")
-        return "\n\n".join(lines)
+    def _extract_url(self, result: Any) -> Optional[str]:
+        """Strictly extracts a GitHub PR URL string from various response formats."""
+        if not result: return None
+        
+        # Check for direct string
+        if isinstance(result, str) and "github.com" in result:
+            return result
+
+        # Check dictionary keys
+        if isinstance(result, dict):
+            url = result.get("html_url") or result.get("url")
+            if not url:
+                # Handle nested formats
+                for key in ["item", "data", "pull_request"]:
+                    inner = result.get(key, {})
+                    if isinstance(inner, dict):
+                        url = inner.get("html_url") or inner.get("url")
+                        if url: break
+            if isinstance(url, str): return url
+
+        # Regex fallback
+        match = re.search(r'https://github\.com/[^"\s\']+/pull/\d+', str(result))
+        return match.group(0) if match else None
