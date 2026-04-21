@@ -19,6 +19,10 @@ class SDLCState(TypedDict):
     errors: Annotated[List[str], add]
     status: str
 
+    a2a_log: Annotated[List[dict], add]
+    last_message: Optional[dict]
+    context_summary: Optional[str]
+
 def initial_state(idea: str, thread_id: str) -> SDLCState:
     return SDLCState(
         idea=idea,
@@ -31,5 +35,8 @@ def initial_state(idea: str, thread_id: str) -> SDLCState:
         feedback=[],
         qa_retries=0,
         errors=[],
-        status='initialized'
+        status='initialized',
+        a2a_log=[],
+        last_message=None,
+        context_summary=None
     )
