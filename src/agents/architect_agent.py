@@ -4,24 +4,37 @@ from src.pipelines.state import SDLCState
 from src.tools.llm_factory import LLMFactory
 from src.prompts.architect_prompt import ARCHITECT_PROMPT
 
+from typing import Any, Dict
+from src.a2a import ARCHITECT_CARD
+from src.memory.recall import recall_for_architect
+from src.pipelines.context import ContextManager
+
 class ArchitectAgent(BaseAgent):
     name = 'architect_agent'
+    card = ARCHITECT_CARD
+    projection_fn = ContextManager.for_architect
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self._chain = ARCHITECT_PROMPT | LLMFactory.get().with_structured_output(Architecture)
+        self._chain = (
+            ARCHITECT_PROMPT 
+            | LLMFactory.get().with_structured_output(Architecture)
+        )
 
-    def _process(self, state: SDLCState) -> dict:
-        feedback = self._latest_feedback(state, 'architecture')
+    def _process(self, state: SDLCState, projection: Dict[str, Any]) -> dict:
+        reqs = projection['requirements']
+        reqs_text = reqs.get('summary','') if isinstance(reqs, dict) else str(reqs)
+        past_lessons = recall_for_architect(reqs_text)
+
         result: Architecture = self._chain.invoke({
-            'requirements': state['requirements'],
-            'feedback': feedback or 'none'
+            'requirements': projection['requirements'],
+            'feedback': projection['prior_feedback'] or 'none',
+            'past_lessons': past_lessons
         })
-        self.logger.info(f'Architecture: {len(result.files)} files, '
-                         f'stack={result.stack}')
-        return {'architecture': result.model_dump(), 'status': 'architecture_designed'}
-    
-    @staticmethod
-    def _latest_feedback(state: SDLCState, phase: str) -> str:
-        relevant = [f for f in state.get('feedback', []) if f.get('phase') == phase]
-        return relevant[-1].get('comment', '') if relevant else ''
+        self.logger.info(
+            f'Architecture: {len(result.files)} files, stack={result.stack}'
+        )
+        return {
+            'architecture': result.model_dump(),
+            'status': 'architecture_designed'
+        }

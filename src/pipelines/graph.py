@@ -1,6 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 
 from src.agents.architect_agent import ArchitectAgent
 from src.agents.developer_agent import DeveloperAgent
