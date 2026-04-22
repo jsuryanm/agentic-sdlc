@@ -1,10 +1,10 @@
 from fastapi import FastAPI
-from app.routes import router
+from app.routes import router as todo_router
 
 app = FastAPI()
 
-app.include_router(router)
+app.include_router(todo_router)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)  # Entry point for the FastAPI application.
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the TODO API"}

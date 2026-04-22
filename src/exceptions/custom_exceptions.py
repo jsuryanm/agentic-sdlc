@@ -22,6 +22,7 @@ class ToolException(SDLCBaseException):
 class LLMToolException(ToolException): pass
 class MCPToolException(ToolException): pass
 class TestRunnerException(ToolException): pass
+class KnowledgeException(ToolException): pass
 
 
 # --- Pipeline layer ---

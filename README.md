@@ -1,35 +1,70 @@
 # Agentic SDLC
 
-A multi-agent pipeline that transforms a one-line project idea into production-ready code, tests, Dockerfile, and a GitHub PR — with human review gates at every major step.
+Turn a one-sentence idea into a working codebase with tests, docs, Docker, CI, and a GitHub PR — with a human in the loop at the moments that matter.
 
-Built with [LangGraph](https://github.com/langchain-ai/langgraph), OpenAI, and Streamlit.
-
----
-
-## How it works
-
-```
-Idea → Requirements → [Review] → Architecture → [Review] → Developer → QA → Developer (retry) → DevOps → [Review] → PR
-```
-
-1. **Requirements** — LLM generates user stories and non-functional requirements
-2. **Human review** — approve or reject with feedback (loops back on reject)
-3. **Architecture** — LLM designs file structure, stack, and entry point
-4. **Human review** — approve or reject
-5. **Developer** — LLM generates all source files + tests, writes them to `workspace/<project>/`
-6. **QA** — runs `pytest` inside the generated project; if tests fail, loops back to Developer (max 2 retries)
-7. **DevOps** — generates Dockerfile and CI YAML, pushes to GitHub via MCP, opens a PR
-8. **Human review** — approve to finish, reject to regenerate deployment config
+Built on **LangGraph**, **FastAPI**, **Streamlit**, **OpenAI**, and **Chroma** for retrieval-augmented generation.
 
 ---
 
-## Setup
+## Pipeline
+
+```
+idea
+  └─> requirements ─┐
+                    ├─[HITL]─ approve ─┐
+                    │                  │
+                    └─[HITL]─ reject ──┘ (loop)
+                                        │
+                                        ▼
+                               architecture ─┐
+                                             ├─[HITL]─ approve ─┐
+                                             └─[HITL]─ reject ──┘ (loop)
+                                                                │
+                                                                ▼
+                                   developer ── code review ── (retry on fail)
+                                                                │
+                                                                ▼
+                                                               qa ── (retry on fail)
+                                                                │
+                                                                ▼
+                                                       [HITL deploy]
+                                                                │
+                                                     approve ──┼── reject → back to qa
+                                                                ▼
+                                                              devops
+                                                                │
+                                                                ▼
+                                                          Dockerfile, CI, GitHub PR
+```
+
+At every stage the agent emits a structured artifact (Pydantic model) and writes a phase report as both Markdown and PDF under `workspace/<project>/docs/`.
+
+---
+
+## Components
+
+| Layer | What it does |
+|-------|--------------|
+| **API** (`src/api`) | FastAPI app, lifespan-managed graph singleton, REST routes for start / resume / state / rewind |
+| **Dashboard** (`src/dashboard`) | Streamlit UI: start runs, show the current HITL prompt, approve / reject with feedback |
+| **Graph** (`src/pipelines/graph.py`) | LangGraph node + edge definitions, conditional routing, interrupt-based HITL |
+| **Agents** (`src/agents`) | Requirements, Architect, Developer, CodeReviewer, QA, DevOps, Doc (one instance per phase) |
+| **A2A bus** (`src/a2a`) | SQLite-backed agent-to-agent message bus with typed agent cards |
+| **Knowledge / RAG** (`src/knowledge`) | Tavily web search, Chroma vector store, topic-scoped retrieval before codegen |
+| **Memory** (`src/memory`) | Per-project episodic long-term memory |
+| **Tools** (`src/tools`) | `LLMFactory`, `TestRunner` (pytest in the generated project), `GitHubMCPClient` |
+
+---
+
+## Quickstart
 
 ### Prerequisites
+
 - Python 3.12+
-- [uv](https://github.com/astral-sh/uv) package manager
+- [`uv`](https://github.com/astral-sh/uv)
 - OpenAI API key
-- (Optional) GitHub Personal Access Token for the DevOps agent
+- (Optional) Tavily API key — for web-retrieval-backed code generation
+- (Optional) GitHub Personal Access Token — for DevOps push + PR
 
 ### Install
 
@@ -41,75 +76,88 @@ uv sync
 
 ### Configure
 
-Copy `.env.example` to `.env` and fill in your values:
+Copy `.env.example` to `.env` and fill in your values. Required: `OPENAI_API_KEY`. Everything else is optional but unlocks capabilities.
 
-```bash
-cp .env.example .env
-```
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | OpenAI API key |
-| `LLM_MODEL` | No | Model name (default: `gpt-4o-mini`) |
-| `LLM_TEMPERATURE` | No | Sampling temperature (default: `0.2`) |
-| `LLM_MAX_TOKENS` | No | Max tokens per LLM call (default: `2000`) |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | No | For DevOps agent GitHub MCP push |
-| `GITHUB_REPO_OWNER` | No | GitHub username/org for PR target |
-| `GITHUB_REPO_NAME` | No | Repo name for PR target |
-| `LOG_LEVEL` | No | `INFO` or `DEBUG` (default: `INFO`) |
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | Chat completions for every agent |
+| `LLM_MODEL` | Override the default model (`gpt-4o-mini`) |
+| `LLM_TEMPERATURE` | Base temperature for the factory |
+| `TAVILY_API_KEY` | Enables web-retrieval RAG before codegen |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | DevOps agent pushes code + opens PRs |
+| `GITHUB_REPO_OWNER` / `GITHUB_REPO_NAME` | Target repo for the PR |
+| `MAX_QA_RETRIES` | How many times QA can loop back to Developer |
+| `MAX_REVIEW_RETRIES` | How many times the code reviewer can loop |
+| `LOG_LEVEL` | `INFO` (default) or `DEBUG` |
 
 ### Run
 
+In two terminals:
+
 ```bash
+# 1. API
+uvicorn src.api.app:app --reload --port 8000 --reload-dir src
+
+# 2. Dashboard
 streamlit run src/dashboard/streamlit_app.py
 ```
 
-Opens at `http://localhost:8501`.
+Open [http://localhost:8501](http://localhost:8501), type an idea in the sidebar, click **Start**, and approve or reject at each HITL gate. The API URL can be overridden with `API_BASE_URL`.
 
 ---
 
-## Usage
+## Output
 
-1. Enter your project idea in the sidebar (e.g. "A FastAPI TODO API with CRUD and in-memory storage")
-2. Click **Start**
-3. The pipeline runs until the first human review gate — review the output in the main panel
-4. Click **Approve** to continue or provide feedback and **Reject & retry**
-5. Repeat at architecture and deployment gates
-6. When the run completes, a link to the generated PR appears (if GitHub MCP is configured)
+Each run produces:
 
-Generated code is written to `workspace/<project-name>/`.
+- `workspace/<project>/` — source files, tests, `Dockerfile`, `.github/workflows/ci.yml`
+- `workspace/<project>/docs/{requirements,architecture,developer,qa,devops}.{md,pdf}` — phase reports
+- `.checkpoints/sdlc.sqlite` — LangGraph run state (resumable by `thread_id`)
+- `logs/sdlc_run_<timestamp>.log` — structured, per-agent logs
+- A GitHub pull request on `GITHUB_REPO_OWNER/GITHUB_REPO_NAME` (if configured)
 
 ---
 
-## Project structure
+## API cheatsheet
 
-```
-src/
-├── agents/         # One class per pipeline stage (base_agent + 5 agents)
-├── core/           # Settings (pydantic-settings, reads .env)
-├── dashboard/      # Streamlit UI
-├── exceptions/     # Custom exception hierarchy
-├── logger/         # Loguru-based structured logging
-├── models/         # Pydantic schemas (Requirements, Architecture, Codebase, ...)
-├── pipelines/      # LangGraph graph definition + SDLCState TypedDict
-├── prompts/        # ChatPromptTemplate definitions per agent
-├── tests/          # Project-level unit tests
-└── tools/          # LLMFactory, TestRunner, GitHubMCPClient
-workspace/          # Generated projects land here
-logs/               # Per-run timestamped log files
-.checkpoints/       # LangGraph SQLite checkpoint database
+```bash
+# start a run
+curl -X POST http://localhost:8000/runs \
+  -H 'content-type: application/json' \
+  -d '{"idea":"A FastAPI TODO API with CRUD and in-memory storage"}'
+
+# resume a paused HITL interrupt
+curl -X POST http://localhost:8000/runs/<thread_id>/resume \
+  -H 'content-type: application/json' \
+  -d '{"verdict":"approve","comment":""}'
+
+# peek at current state
+curl http://localhost:8000/runs/<thread_id>/state
 ```
 
+Full route list is in `src/api/routes.py`.
+
 ---
 
-## Running tests
+## Tests
 
 ```bash
 pytest src/tests/
 ```
 
+Project-level tests live in `src/tests/`; they cover graph routing, agents, and schemas. They're separate from the tests the pipeline *generates* (those live in `workspace/<project>/tests/`).
+
 ---
 
-## Logs
+## Documentation
 
-Each run writes a timestamped log to `logs/sdlc_run_<timestamp>.log`. Console output uses the same structured format with per-agent context binding.
+- [`architecture.md`](architecture.md) — system design, graph shape, state shape, data flow
+- [`agents.md`](agents.md) — reference for every agent: responsibilities, inputs, outputs, prompt, failure modes
+- [`skills.md`](skills.md) — conventions and patterns you're expected to follow when extending this repo
+- [`CLAUDE.md`](CLAUDE.md) — working notes for Claude Code / similar coding agents
+
+---
+
+## License
+
+MIT.

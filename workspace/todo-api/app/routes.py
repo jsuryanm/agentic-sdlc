@@ -1,26 +1,34 @@
 from fastapi import APIRouter, HTTPException
-from app.models import TodoItem, TodoItemUpdate
-from app.services import TodoService
+from app.models import Todo, TodoCreate, TodoUpdate
+from app.storage import todo_storage
 
 router = APIRouter()
-service = TodoService()
 
-@router.post("/todos", response_model=TodoItem, status_code=201)
-async def create_todo(item: TodoItem):
-    return service.create_todo(item)
+@router.post("/todos/", response_model=Todo)
+async def create_todo(todo: TodoCreate):
+    return todo_storage.create(todo)
 
-@router.get("/todos", response_model=list[TodoItem])
+@router.get("/todos/", response_model=list[Todo])
 async def read_todos():
-    return service.get_all_todos()
+    return todo_storage.get_all()
 
-@router.put("/todos/{id}", response_model=TodoItem)
-async def update_todo(id: int, item: TodoItemUpdate):
-    updated_item = service.update_todo(id, item)
-    if updated_item is None:
-        raise HTTPException(status_code=404, detail="Todo item not found")
-    return updated_item
+@router.get("/todos/{todo_id}", response_model=Todo)
+async def read_todo(todo_id: int):
+    todo = todo_storage.get(todo_id)
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return todo
 
-@router.delete("/todos/{id}", status_code=204)
-async def delete_todo(id: int):
-    if not service.delete_todo(id):
-        raise HTTPException(status_code=404, detail="Todo item not found")  # FastAPI routes for CRUD operations on TODO items.
+@router.put("/todos/{todo_id}", response_model=Todo)
+async def update_todo(todo_id: int, todo_update: TodoUpdate):
+    todo = todo_storage.update(todo_id, todo_update)
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return todo
+
+@router.delete("/todos/{todo_id}")
+async def delete_todo(todo_id: int):
+    success = todo_storage.delete(todo_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return {"detail": "Todo deleted"}

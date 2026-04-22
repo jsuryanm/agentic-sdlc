@@ -1,4 +1,6 @@
 from pathlib import Path
+from typing import Optional
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,6 +11,7 @@ class Config(BaseSettings):
     LLM_MODEL: str = Field(default="gpt-4o-mini")
     LLM_TEMPERATURE: float = Field(default=0.2, ge=0, le=1)
     LLM_MAX_TOKENS: int = Field(default=2000)
+    OPENAI_EMBEDDINGS_MODEL: str = Field(default="text-embedding-3-small")
 
     # GitHub MCP
     GITHUB_PERSONAL_ACCESS_TOKEN: str = Field(default="")
@@ -18,6 +21,22 @@ class Config(BaseSettings):
 
     # QA loop
     MAX_QA_RETRIES: int = 2
+
+    # Code review loop
+    MAX_REVIEW_RETRIES: int = 2
+
+    # Retrieval / RAG
+    TAVILY_API_KEY: Optional[str] = None
+    TAVILY_MCP_URL: str = Field(default="https://api.tavily.com")
+    USE_AGENTIC_RAG: bool = False
+    AGENTIC_RAG_MAX_ITERATIONS: int = 2
+    RAG_CHUNKS_PER_QUERY: int = 4
+
+    # API
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    API_BASE_URL: str = "http://localhost:8000"
+    STREAMLIT_ORIGIN: str = "http://localhost:8501"
 
     # Paths
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]

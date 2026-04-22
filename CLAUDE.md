@@ -6,7 +6,7 @@ This file gives Claude Code the context it needs to work effectively in this rep
 
 ## What this project is
 
-A LangGraph-based multi-agent pipeline that takes a plain-English idea and produces runnable code, tests, a Dockerfile, CI config, and a GitHub PR. A Streamlit dashboard drives the UI with human-in-the-loop approval gates.
+A LangGraph-based multi-agent pipeline that takes a plain-English idea and produces runnable code, tests, Markdown + PDF documentation, a Dockerfile, CI config, and a GitHub PR. A FastAPI service drives the graph; a Streamlit dashboard is the UI and handles human-in-the-loop (HITL) approval gates.
 
 ---
 
@@ -15,9 +15,12 @@ A LangGraph-based multi-agent pipeline that takes a plain-English idea and produ
 | Task | Command |
 |------|---------|
 | Install dependencies | `uv sync` |
+| Run the API | `uvicorn src.api.app:app --reload --port 8000 --reload-dir src` |
 | Run the dashboard | `streamlit run src/dashboard/streamlit_app.py` |
 | Run project tests | `pytest src/tests/` |
 | Run a single test file | `pytest src/tests/test_graph_routing.py -v` |
+
+The dashboard talks to the API over HTTP (`API_BASE_URL`, default `http://localhost:8000`). Always start the API first.
 
 ---
 
@@ -25,21 +28,46 @@ A LangGraph-based multi-agent pipeline that takes a plain-English idea and produ
 
 ```
 src/
-├── agents/         # Agent classes (one per SDLC stage + BaseAgent)
-├── core/config.py  # All settings — read from .env via pydantic-settings
+├── a2a/            # Agent-to-agent message bus (SQLite-backed) + agent cards
+├── agents/         # One class per SDLC stage + BaseAgent + DocAgent (parameterized by phase)
+├── api/            # FastAPI app, routes, lifespan + deps (graph singleton)
+├── core/config.py  # pydantic-settings BaseSettings — reads .env
 ├── dashboard/      # Streamlit app (single file: streamlit_app.py)
 ├── exceptions/     # Custom exception hierarchy
+├── knowledge/      # Agentic RAG: Tavily ingest, Chroma store, retriever
 ├── logger/         # Loguru setup; use logger.bind(agent=name) everywhere
+├── memory/         # Long-term memory (per-project episodic recall)
 ├── models/schemas.py  # All Pydantic models (Requirements, Architecture, Codebase, ...)
 ├── pipelines/
-│   ├── graph.py    # LangGraph node + edge definitions; build_graph()
+│   ├── context.py  # ContextManager: per-agent state projections + rolling summary
+│   ├── graph.py    # LangGraph nodes + edges; build_graph(), make_checkpointer()
+│   ├── rewind.py   # Checkpoint rewind helpers
 │   └── state.py    # SDLCState TypedDict + initial_state()
 ├── prompts/        # One ChatPromptTemplate file per agent
 ├── tests/          # Unit tests for this project (not the generated code)
 └── tools/          # LLMFactory, TestRunner, GitHubMCPClient
 workspace/          # Generated project directories land here (gitignored)
-.checkpoints/       # LangGraph SQLite checkpoint DB (gitignored)
+.checkpoints/       # LangGraph + A2A + memory SQLite DBs (gitignored)
 ```
+
+---
+
+## Pipeline shape
+
+```
+requirement -> hitl_req -> doc_requirements -> architect -> hitl_arch -> doc_architecture
+ -> developer -> hitl_developer -> code_review (auto-loop to developer while
+    review_retries < MAX_REVIEW_RETRIES) -> hitl_review -> doc_developer
+ -> qa (auto-loop to developer while qa_retries < MAX_QA_RETRIES) -> hitl_qa
+ -> doc_qa -> hitl_deploy -> devops -> doc_devops -> END
+```
+
+Every major agent is followed by a human-in-the-loop gate (`hitl_*`). Nothing
+advances to the next step without explicit approval. Rejecting any gate with a
+comment loops back to the previous working agent (developer for dev/review/qa;
+architect for arch; requirement for reqs). The automatic review/QA retry loops
+still exist, but once they hit the retry ceiling the result is surfaced to the
+human rather than silently proceeding.
 
 ---
 
@@ -47,16 +75,18 @@ workspace/          # Generated project directories land here (gitignored)
 
 Every agent extends `BaseAgent` (`src/agents/base_agent.py`):
 
-- `run(state)` — public entry point; wraps `_process` with timing + error handling
-- `_process(state) -> dict` — must be implemented; returns state update dict
+- `run(state)` — public entry point; wraps `_process` with timing, context projection, and error handling
+- `_process(state, projection) -> dict` — must be implemented; returns state update dict
 
-The returned dict is **merged** into `SDLCState` by LangGraph. Fields with `Annotated[List, add]` (e.g. `feedback`, `errors`) are appended, not replaced.
+The returned dict is **merged** into `SDLCState` by LangGraph. Fields with `Annotated[List, add]` (e.g. `feedback`, `errors`, `docs`) are appended, not replaced.
 
 When an agent fails, `BaseAgent.run()` catches the exception and returns:
 ```python
 {'errors': [msg], 'status': f'{self.name}_failed'}
 ```
-This means downstream agents must guard against missing keys (e.g. `codebase` may be `None`).
+Downstream agents must guard against missing keys (e.g. `codebase` may be `None`).
+
+`DocAgent` is parameterized: `DocAgent('requirements')`, `DocAgent('architecture')`, etc. Doc output is written as both `.md` and `.pdf` under `workspace/<project>/docs/` once `project_dir` is known; earlier phases buffer in `state['docs']` and flush when the first project-dir-aware phase sees it.
 
 ---
 
@@ -64,10 +94,10 @@ This means downstream agents must guard against missing keys (e.g. `codebase` ma
 
 Defined in `src/pipelines/graph.py`. Key patterns:
 
-- `build_graph(checkpointer)` compiles the graph
-- `make_checkpointer()` opens an SQLite-backed checkpointer from `.checkpoints/sdlc.sqlite`
+- `build_graph(checkpointer)` compiles the graph (agent singletons are module-level)
+- `make_checkpointer()` opens an SQLite-backed checkpointer at `.checkpoints/sdlc.sqlite`
 - HITL nodes use `interrupt({...})` to pause and `Command(resume={...})` to continue
-- `thread_id` in `configurable` identifies a run; same thread_id resumes from checkpoint
+- `thread_id` in `configurable` identifies a run; the same `thread_id` resumes from checkpoint
 - `SDLCState` fields initialized to `None` — always use `state.get(key) or default` pattern, not `state.get(key, default)`, since explicitly-`None` values don't trigger the default
 
 ---
@@ -81,12 +111,16 @@ Defined in `src/pipelines/graph.py`. Key patterns:
 | `requirements` | Optional[dict] | RequirementAgent |
 | `architecture` | Optional[dict] | ArchitectAgent |
 | `codebase` | Optional[dict] | DeveloperAgent (includes `project_dir`) |
+| `code_review` | Optional[dict] | CodeReviewAgent |
 | `test_report` | Optional[dict] | QAAgent |
 | `deployment` | Optional[dict] | DevOpsAgent |
+| `docs` | List[dict] (append) | DocAgent |
 | `feedback` | List[dict] (append) | HITL nodes |
 | `qa_retries` | int | QAAgent |
+| `review_retries` | int | CodeReviewAgent |
 | `errors` | List[str] (append) | BaseAgent on failure |
 | `status` | str | Each agent |
+| `context_summary` | str | ContextManager |
 
 ---
 
@@ -95,8 +129,9 @@ Defined in `src/pipelines/graph.py`. Key patterns:
 1. Create `src/agents/my_agent.py` extending `BaseAgent`
 2. Add a prompt in `src/prompts/my_prompt.py`
 3. Add a schema in `src/models/schemas.py` if needed
-4. Add a node function and edges in `src/pipelines/graph.py`
-5. Tests go in `src/tests/`
+4. Register an agent card in `src/a2a/cards.py` if it sends/receives A2A messages
+5. Add a node function and edges in `src/pipelines/graph.py`
+6. Tests go in `src/tests/`
 
 ---
 
@@ -109,6 +144,30 @@ For structured output:
 chain = PROMPT | LLMFactory.get().with_structured_output(MySchema)
 result: MySchema = chain.invoke({...})
 ```
+
+---
+
+## API
+
+`src/api/app.py` exposes `app = create_app()` so uvicorn can load it directly without `--factory`. Routes in `src/api/routes.py`:
+
+- `POST /runs` — start a run (body: `{idea, thread_id?}`)
+- `POST /runs/{thread_id}/resume` — resume from an interrupt (body: `{verdict, comment}`)
+- `GET /runs/{thread_id}/state` — current state + pending interrupt
+- `GET /runs/{thread_id}/checkpoints` — list checkpoints
+- `POST /runs/{thread_id}/rewind` — rewind to a checkpoint
+
+The graph is built once on FastAPI startup (`deps.startup()`) and reused across requests.
+
+---
+
+## Knowledge / RAG
+
+`src/knowledge/` runs "agentic RAG" before code generation: Tavily web search (`tavily_client.py`, uses the official `tavily-python` async client), chunked into Chroma (`store.py`), retrieved by topic (`retriever.py`), orchestrated by `agentic_rag.py`. Requires `TAVILY_API_KEY`.
+
+## Long-term memory
+
+`src/memory/store.py` stores per-project episodic memories in SQLite + Chroma. `recall.py` exposes helpers like `recall_for_architect()` used from individual agents.
 
 ---
 

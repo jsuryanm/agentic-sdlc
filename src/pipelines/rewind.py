@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Any, List
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 from src.logger.custom_logger import logger
 
@@ -8,8 +8,9 @@ from src.logger.custom_logger import logger
 class Step:
     """One entry in a run's history."""
     checkpoint_id: str
-    node: str            
-    has: dict[str, bool]
+    node: str
+    status: str
+    has: Dict[str, bool] = field(default_factory=dict)
 
 
 class CheckpointRewind:
@@ -35,6 +36,7 @@ class CheckpointRewind:
                     "requirements": values.get("requirements") is not None,
                     "architecture": values.get("architecture") is not None,
                     "codebase": values.get("codebase") is not None,
+                    "code_review": values.get("code_review") is not None,
                     "test_report": values.get("test_report") is not None,
                     "deployment": values.get("deployment") is not None,
                 },
@@ -57,7 +59,6 @@ class CheckpointRewind:
         return snapshot.values
 
     def replay_config(self, checkpoint_id: str) -> dict:
-        """Build a graph.invoke() config that continues from a checkpoint."""
         return {
             "configurable": {
                 "thread_id": self.thread_id,

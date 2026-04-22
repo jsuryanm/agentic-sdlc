@@ -9,5 +9,6 @@ ARCHITECT_PROMPT = ChatPromptTemplate.from_messages([
     ('human',
      'Requirements:\n{requirements}\n\n'
      'Previous feedback (if any): {feedback}\n\n'
+     'Past lessons from similar projects:\n{past_lessons}\n\n'
      'Produce the structured Architecture object.')
 ])

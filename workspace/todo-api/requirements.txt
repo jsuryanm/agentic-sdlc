@@ -1,5 +1,5 @@
 fastapi
-uvicorn
-pydantic[dotenv]
+uvicorn[standard]
+pydantic
 pytest
-pytest-asyncio
+httpx

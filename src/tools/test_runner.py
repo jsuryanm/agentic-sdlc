@@ -1,7 +1,8 @@
-import subprocess 
+import subprocess
+import sys
 # runs external programs,executes system commands
 
-from pathlib import Path 
+from pathlib import Path
 
 from src.exceptions.custom_exceptions import TestRunnerException
 from src.logger.custom_logger import logger 
@@ -18,9 +19,20 @@ class TestRunner:
         log = logger.bind(agent="qa")
         log.info(f"Running pytest in {self.workspace}")
 
+        preflight_err = self._preflight()
+        if preflight_err is not None:
+            log.info(f"Test result: error ({preflight_err})")
+            return TestReport(
+                status=TestStatus.ERROR,
+                passed=0,
+                failed=0,
+                errors=[preflight_err],
+                raw_output=preflight_err,
+            )
+
         try:
             result = subprocess.run(
-                args=["python","-m","pytest","-q","--tb=short"],
+                args=[sys.executable,"-m","pytest","-q","--tb=short"],
                 cwd=str(self.workspace), # runs inside the workspace
                 capture_output=True, # captures stdout and stderr
                 text=True, # returns text
@@ -54,6 +66,19 @@ class TestRunner:
         log.info(f"Test result: {status.value} ({passed} passed, {failed} failed)")
         return report 
     
+    def _preflight(self) -> "str | None":
+        if not (self.workspace / "requirements.txt").exists():
+            return f"missing requirements.txt in {self.workspace}"
+        tests_dir = self.workspace / "tests"
+        has_tests = False
+        if tests_dir.exists():
+            has_tests = any(tests_dir.glob("test_*.py"))
+        if not has_tests:
+            has_tests = any(self.workspace.glob("test_*.py"))
+        if not has_tests:
+            return f"no tests discovered in {self.workspace}"
+        return None
+
     @staticmethod
     def _parse_counts(output: str) -> tuple[int,int]:
         import re

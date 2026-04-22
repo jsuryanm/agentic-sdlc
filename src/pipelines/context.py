@@ -13,6 +13,7 @@ _SUMMARY_SYSTEM = (
 
 
 class ContextManager:
+    """Prepares per-agent input projections and maintains a rolling summary."""
 
     @staticmethod
     def for_requirements(state: SDLCState) -> Dict[str, Any]:
@@ -34,16 +35,42 @@ class ContextManager:
     def for_developer(state: SDLCState) -> Dict[str, Any]:
         qa = state.get("test_report") or {}
         qa_feedback = "none"
-        # Only include distilled errors — not 4KB of pytest raw_output
         if qa and qa.get("status") != "pass":
             errors = qa.get("errors", [])
             qa_feedback = "\n".join(errors[:3])[:2000]
+
+        review = state.get("code_review") or {}
+        review_feedback = "none"
+        if review and not review.get("passed", True):
+            fixes = review.get("required_fixes", [])
+            review_feedback = "\n".join(f"- {f}" for f in fixes[:10])[:2000]
+
         return {
             "requirements_summary": ContextManager._summarize_reqs(
                 state.get("requirements")
             ),
             "architecture": state.get("architecture") or {},
             "qa_feedback": qa_feedback,
+            "review_feedback": review_feedback,
+            "summary": state.get("context_summary") or "",
+        }
+
+    @staticmethod
+    def for_code_review(state: SDLCState) -> Dict[str, Any]:
+        codebase = state.get("codebase") or {}
+        files = codebase.get("files", [])
+        # Trim content to keep token usage reasonable.
+        trimmed = [
+            {"path": f.get("path", ""), "content": (f.get("content", "") or "")[:4000]}
+            for f in files
+        ]
+        return {
+            "requirements_summary": ContextManager._summarize_reqs(
+                state.get("requirements")
+            ),
+            "architecture": state.get("architecture") or {},
+            "files": trimmed,
+            "retry_attempt": state.get("review_retries", 0),
             "summary": state.get("context_summary") or "",
         }
 
@@ -66,9 +93,28 @@ class ContextManager:
         }
 
     @staticmethod
+    def for_doc(phase: str):
+        """Returns a projection_fn for a DocAgent bound to one phase."""
+        def _projection(state: SDLCState) -> Dict[str, Any]:
+            artifact_key = {
+                "requirements": "requirements",
+                "architecture": "architecture",
+                "developer": "codebase",
+                "qa": "test_report",
+                "devops": "deployment",
+            }[phase]
+            artifact = state.get(artifact_key) or {}
+            return {
+                "phase": phase,
+                "artifact": artifact,
+                "project_dir": (state.get("codebase") or {}).get("project_dir"),
+                "project_name": (state.get("requirements") or {}).get("project_name"),
+                "summary": state.get("context_summary") or "",
+            }
+        return _projection
+
+    @staticmethod
     def update_rolling_summary(state: SDLCState) -> str:
-        """Called by BaseAgent after each successful _process."""
-        # Lazy import — keeps projections importable without langchain stack
         from src.tools.llm_factory import LLMFactory
 
         prior = state.get("context_summary") or "(project just started)"
@@ -124,10 +170,16 @@ class ContextManager:
                 f"Architecture: stack={arch.get('stack')}, "
                 f"{len(arch.get('files', []))} files"
             )
-        if "code" in status and state.get("codebase"):
+        if "code_generated" in status and state.get("codebase"):
             return (
                 f"Code generated: "
                 f"{len(state['codebase'].get('files', []))} files written"
+            )
+        if "review" in status and state.get("code_review"):
+            cr = state["code_review"]
+            return (
+                f"Code review: passed={cr.get('passed')}, "
+                f"{len(cr.get('issues', []))} issues"
             )
         if "qa" in status and state.get("test_report"):
             tr = state["test_report"]

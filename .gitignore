@@ -209,3 +209,7 @@ __marimo__/
 logs
 .checkpoints
 .claude
+
+workspace\
+.worktrees
+plan.md
