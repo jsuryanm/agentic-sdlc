@@ -1,31 +1,30 @@
 ## Purpose
-The purpose of this architecture phase is to establish a robust framework for the todo-api project, leveraging modern technologies to enhance performance and developer productivity.
+This document outlines the architectural decisions and components for the todo-api project, which utilizes FastAPI, Pydantic, and pytest.
 
 ## Inputs
-- Technology stack: FastAPI, Pydantic, pytest
-- Project requirements for task management
-- User expectations regarding features such as authentication and notifications
+- Project requirements for a todo API.
+- Selection of technology stack: FastAPI, Pydantic, pytest.
 
 ## Outputs
-- Five foundational files created:
+- Six foundational files created for the API architecture:
   - `app/main.py`: Entry point for the FastAPI application.
   - `app/models.py`: Pydantic models for TODO items.
-  - `app/routes.py`: FastAPI routes for CRUD operations on TODO items.
+  - `app/routes.py`: API routes for CRUD operations on TODO items.
   - `app/storage.py`: In-memory storage implementation for TODO items.
-  - `tests/test_routes.py`: Unit tests for the FastAPI routes.
-- Defined components: API, Data Models, In-memory Storage, Tests
+  - `app/exceptions.py`: Custom exception handling for the API.
+  - `tests/test_routes.py`: Unit tests for the API routes.
 
 ## Key decisions
-- Adoption of FastAPI for its asynchronous capabilities.
-- Use of Pydantic for data validation to ensure data integrity.
-- Implementation of pytest for testing to streamline the development process.
+- Adoption of FastAPI for its performance and ease of use.
+- Use of Pydantic for data validation of API inputs.
+- Prioritization of testing with pytest to ensure code reliability.
 
 ## Risks and open questions
-- Unresolved issues regarding user authentication methods which may impact security and user experience.
-- Need for a notification system for task reminders, which is critical for user engagement.
-- Potential performance bottlenecks with in-memory storage as the user base grows.
+- Implementation of user authentication is still an open issue.
+- Development of a robust error handling framework is pending.
+- Integration of third-party services for notifications and task reminders needs further discussion.
 
 ## Next steps
-- Address the open questions regarding user authentication and notifications.
-- Conduct further testing to validate the architecture under load.
-- Begin integration of user feedback to refine the architecture and feature set.
+- Finalize requirements for user authentication and error handling.
+- Continue discussions on third-party service integrations.
+- Begin development of the identified components and implement unit tests for new features.

@@ -1,10 +1,16 @@
 from fastapi import FastAPI
-from app.routes import router as todo_router
+from fastapi.middleware.cors import CORSMiddleware
+from app.routes import todo_router
 
 app = FastAPI()
 
-app.include_router(todo_router)
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Restrict to specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the TODO API"}
+app.include_router(todo_router)

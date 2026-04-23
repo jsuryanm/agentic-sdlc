@@ -16,7 +16,6 @@ from src.pipelines.state import SDLCState
 from src.tools.llm_factory import LLMFactory
 from src.prompts.devops_prompt import DEVOPS_PROMPT
 
-
 class DevOpsAgent(BaseAgent):
     name = "devops_agent"
     card = DEVOPS_CARD
@@ -33,48 +32,43 @@ class DevOpsAgent(BaseAgent):
         arch = state["architecture"]
         reqs = state["requirements"]
         project_dir = Path(state["codebase"]["project_dir"])
+        
+        repo_name = reqs.get("project_name", "generated-project").lower().replace(" ", "-").strip()
 
-        # Generate deployment artifacts (Dockerfile, CI/CD YAML)
         plan = self._chain.invoke({
-            "project_name": reqs["project_name"],
+            "project_name": repo_name,
             "entry_point": arch["entry_point"],
             "stack": arch["stack"],
         })
 
-        # 1. Sync generated files to local disk
+        # Write artifacts to local disk
         (project_dir / "Dockerfile").write_text(plan.dockerfile, encoding="utf-8")
         ci_dir = project_dir / ".github" / "workflows"
         ci_dir.mkdir(parents=True, exist_ok=True)
         (ci_dir / "ci.yml").write_text(plan.ci_yaml, encoding="utf-8")
 
-        self.logger.info(f"Artifacts prepared in {project_dir}")
-
-        # 2. Setup unique branch to ensure a blank slate every run
-        unique_branch = f"deploy-{int(time.time())}"
-        
-        # 3. Execute MCP Push and PR creation
-        pr_url = self._run_async(self._push_via_mcp(project_dir, unique_branch, reqs["project_name"]))
+        # Static branch name for the PR
+        branch_name = "init-codebase"
+        pr_url = self._run_async(self._push_via_mcp(project_dir, branch_name, repo_name, reqs["project_name"]))
 
         return {
             "deployment": {
                 **plan.model_dump(), 
-                "branch_name": unique_branch,
+                "branch_name": branch_name,
                 "pr_url": pr_url, 
-                "project_dir": str(project_dir)
+                "project_dir": str(project_dir),
+                "repo_name": repo_name
             },
             "status": "deployment_ready",
         }
 
     def _run_async(self, coro):
-        """Helper to safely manage the async event loop in a sync context."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+        try: return loop.run_until_complete(coro)
+        finally: loop.close()
 
-    async def _push_via_mcp(self, project_dir: Path, branch: str, project_name: str) -> Optional[str]:
+    async def _push_via_mcp(self, project_dir: Path, branch: str, repo_name: str, display_name: str) -> Optional[str]:
         try:
             client = MultiServerMCPClient({
                 "github": {
@@ -84,83 +78,89 @@ class DevOpsAgent(BaseAgent):
                 }
             })
             tools = await client.get_tools()
-            owner, repo = settings.GITHUB_REPO_OWNER, settings.GITHUB_REPO_NAME
-
-            # --- STRICT TOOL MAPPING ---
-            # Mapping names exactly to avoid 'update_pull_request' (which causes pullNumber errors)
             tool_map = {t.name: t for t in tools}
-            
+            owner = settings.GITHUB_REPO_OWNER
+
+            # Tools
+            create_repo_tool = tool_map.get("create_repository")
             commit_tool = tool_map.get("create_or_update_file")
             branch_tool = tool_map.get("create_branch")
             pr_tool = tool_map.get("create_pull_request")
             get_contents_tool = tool_map.get("get_file_contents")
 
-            if not all([commit_tool, branch_tool, pr_tool]):
-                self.logger.error("Missing critical GitHub tools in MCP toolset.")
-                return None
+            # 1. CREATE REPO (Ignore if exists)
+            try:
+                self.logger.info(f"Step 1: Ensure repository {repo_name} exists...")
+                await create_repo_tool.ainvoke({"name": repo_name})
+                await asyncio.sleep(2)
+            except Exception as e:
+                if "422" in str(e): self.logger.info("Repo already exists.")
 
-            # 1. Create the new isolated branch
-            await branch_tool.ainvoke({"owner": owner, "repo": repo, "branch": branch, "base": "main"})
-            self.logger.info(f"Created isolated branch: {branch}")
+            # 2. CHECK MAIN & BOOTSTRAP WITH PLACEHOLDER
+            try:
+                await get_contents_tool.ainvoke({"owner": owner, "repo": repo_name, "path": "README.md", "ref": "main"})
+                self.logger.info("Step 2: 'main' is already initialized.")
+            except Exception:
+                self.logger.info("Step 2: Seeding 'main' with placeholder README...")
+                await commit_tool.ainvoke({
+                    "owner": owner, "repo": repo_name,
+                    "path": "README.md",
+                    "content": f"# {display_name}\n\nInitial repository setup.",
+                    "branch": "main",
+                    "message": "chore: bootstrap repository"
+                })
+                await asyncio.sleep(2)
 
-            # 2. Collect and push ALL files (app logic + requirements + devops files)
-            files_to_push = self._collect_all_files(project_dir)
-            pushed_count = 0
-            
-            for f in files_to_push:
+            # 3. CREATE FEATURE BRANCH (Ignore if exists)
+            try:
+                self.logger.info(f"Step 3: Creating branch {branch}...")
+                await branch_tool.ainvoke({"owner": owner, "repo": repo_name, "branch": branch, "base": "main"})
+            except Exception as e:
+                self.logger.info(f"Branch {branch} already exists or error: {e}")
+
+            # 4. UPSERT FILES (Handle SHAs correctly)
+            files = self._collect_all_files(project_dir)
+            for f in files:
                 path = f["path"]
-                # Resolve SHA from deploy branch first (in case we already pushed
-                # it this run) then fall back to main.
-                sha = await self._resolve_sha(
-                    get_contents_tool, owner, repo, path, [branch, "main"]
-                )
-
-                # GitHub Contents API rejects empty bodies on create/update.
-                content = f["content"] if f["content"] else "\n"
-
+                # ALWAYS check for SHA on the target branch before pushing
+                sha = await self._resolve_sha(get_contents_tool, owner, repo_name, path, [branch])
+                
                 try:
                     await commit_tool.ainvoke({
-                        "owner": owner, "repo": repo,
+                        "owner": owner, "repo": repo_name,
                         "path": path,
-                        "content": content,
+                        "content": f["content"] or "\n",
                         "branch": branch,
-                        "message": f"SDLC Automator: Adding {path}",
+                        "message": f"update: {path}",
                         **({"sha": sha} if sha else {})
                     })
-                    pushed_count += 1
-                    self.logger.info(f"Successfully pushed: {path}")
+                    self.logger.info(f"Pushed: {path}")
                 except Exception as e:
-                    self.logger.error(f"Failed to push {path}: {e}")
+                    self.logger.error(f"Failed {path}: {e}")
 
-            # 3. Create the Pull Request and extract ONLY the URL
-            if pushed_count > 0:
-                try:
-                    self.logger.info(f"Opening Pull Request for {branch}...")
-                    pr_result = await pr_tool.ainvoke({
-                        "owner": owner, "repo": repo, 
-                        "title": f"SDLC Deployment: {project_name}",
-                        "body": "Automated deployment PR with code and CI/CD artifacts.",
-                        "head": branch, 
-                        "base": "main"
-                    })
-                    
-                    # Ensure we only return a clean string URL
-                    clean_url = self._extract_url(pr_result)
-                    if clean_url:
-                        self.logger.info(f"PR CREATED: {clean_url}")
-                        return clean_url
-                        
-                except Exception as pr_e:
-                    self.logger.error(f"PR Creation Failed: {pr_e}")
+            # 5. CREATE PR
+            try:
+                pr_result = await pr_tool.ainvoke({
+                    "owner": owner, "repo": repo_name, 
+                    "title": f"SDLC: Initial Codebase for {display_name}",
+                    "body": "This PR contains the generated FastAPI logic and CI/CD configurations.",
+                    "head": branch, "base": "main"
+                })
+                return self._extract_url(pr_result)
+            except Exception as e:
+                if "A pull request already exists" in str(e):
+                    # Attempt to find the existing PR URL in the error or repo
+                    return f"https://github.com/{owner}/{repo_name}/pulls"
+                self.logger.error(f"PR Error: {e}")
 
             return None
 
         except Exception as e:
-            self.logger.error(f"Global MCP Workflow Error: {e}")
+            self.logger.error(f"Global MCP Error: {e}")
             return None
 
+    # --- HELPERS (SAME AS PREVIOUS) ---
     def _collect_all_files(self, project_dir: Path) -> List[Dict[str, str]]:
-        """Scans directory and captures everything not explicitly ignored."""
         files = []
         exclude = {".git", "__pycache__", "venv", ".venv", ".DS_Store", ".pytest_cache"}
         for p in project_dir.rglob("*"):
@@ -170,75 +170,48 @@ class DevOpsAgent(BaseAgent):
                         "path": p.relative_to(project_dir).as_posix(),
                         "content": p.read_text(encoding="utf-8", errors="replace")
                     })
-                except Exception as e:
-                    self.logger.warning(f"Skipping unreadable file {p}: {e}")
+                except Exception: continue
         return files
 
     async def _resolve_sha(self, tool, owner, repo, path, refs):
-        """Fetches the SHA of a file if it exists in the specified git references.
-
-        MCP tool responses vary — dict, pydantic-ish object, JSON string, or
-        JSON array (for directory listings). Try each shape before giving up.
-        """
-        if not tool:
-            return None
+        if not tool: return None
         for ref in refs:
             try:
-                res = await tool.ainvoke(
-                    {"owner": owner, "repo": repo, "path": path, "ref": ref}
-                )
-            except Exception:
-                continue
-            sha = self._extract_sha(res, path)
-            if sha:
-                return sha
+                res = await tool.ainvoke({"owner": owner, "repo": repo, "path": path, "ref": ref})
+                sha = self._extract_sha(res, path)
+                if sha: return sha
+            except: continue
         return None
 
-    @staticmethod
-    def _extract_sha(res: Any, path: str) -> Optional[str]:
-        if res is None:
-            return None
+    def _extract_sha(self, res: Any, path: str) -> Optional[str]:
+        if not res: return None
         if isinstance(res, str):
-            try:
-                res = json.loads(res)
-            except Exception:
-                return None
+            try: res = json.loads(res)
+            except: return None
         if isinstance(res, dict):
-            if res.get("sha"):
-                return res["sha"]
-            inner = res.get("content") or res.get("data") or res.get("item")
-            if isinstance(inner, (dict, list)):
-                return DevOpsAgent._extract_sha(inner, path)
-            return None
+            if res.get("sha"): return res["sha"]
+            for k in ["content", "data", "item"]:
+                inner = res.get(k)
+                if isinstance(inner, (dict, list)):
+                    sha = self._extract_sha(inner, path)
+                    if sha: return sha
         if isinstance(res, list):
-            # Directory listing — match our exact path.
             for item in res:
-                if isinstance(item, dict):
-                    if item.get("path") == path and item.get("sha"):
-                        return item["sha"]
-            return None
+                if isinstance(item, dict) and item.get("path") == path:
+                    return item.get("sha")
         return getattr(res, "sha", None)
 
     def _extract_url(self, result: Any) -> Optional[str]:
-        """Strictly extracts a GitHub PR URL string from various response formats."""
         if not result: return None
-        
-        # Check for direct string
-        if isinstance(result, str) and "github.com" in result:
-            return result
-
-        # Check dictionary keys
+        if isinstance(result, str) and "github.com" in result: return result
         if isinstance(result, dict):
             url = result.get("html_url") or result.get("url")
             if not url:
-                # Handle nested formats
                 for key in ["item", "data", "pull_request"]:
                     inner = result.get(key, {})
                     if isinstance(inner, dict):
                         url = inner.get("html_url") or inner.get("url")
                         if url: break
             if isinstance(url, str): return url
-
-        # Regex fallback
         match = re.search(r'https://github\.com/[^"\s\']+/pull/\d+', str(result))
         return match.group(0) if match else None
