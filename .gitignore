@@ -213,3 +213,4 @@ logs
 workspace\
 .worktrees
 plan.md
+testenv/

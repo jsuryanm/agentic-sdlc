@@ -122,6 +122,7 @@ def hitl_review(state: SDLCState) -> dict:
 
 def hitl_qa(state: SDLCState) -> dict:
     report = state.get('test_report') or {}
+
     preview = {
         'status': report.get('status'),
         'passed': report.get('passed'),
@@ -129,22 +130,35 @@ def hitl_qa(state: SDLCState) -> dict:
         'errors': (report.get('errors') or [])[:3],
         'qa_retries': state.get('qa_retries', 0),
     }
-    if report.get('status') == 'pass':
-        message = 'QA tests passed. Approve to document the QA phase and move toward deployment.'
-    else:
-        message = (
-            'QA tests FAILED or errored (collection/import error). Approve to '
-            'proceed anyway, or reject to regenerate the code with your feedback.'
+
+    if report.get("status") != "pass":
+        logger.bind(agent='hitl').warning(
+            "QA failed — forcing developer loop"
         )
+        return {
+            'feedback': [{
+                'phase': 'qa',
+                'verdict': 'reject',
+                'comment': 'Tests are failing. Fix required.'
+            }]
+        }
+
     decision = interrupt({
         'phase': 'qa',
         'preview': preview,
-        'message': message,
+        'message': 'QA tests passed. Approve to continue to deployment.',
     })
+
     verdict = decision.get('verdict', 'approve')
     comment = decision.get('comment', '')
-    logger.bind(agent='hitl').info(f'[qa] verdict = {verdict}')
-    return {'feedback': [{'phase': 'qa', 'verdict': verdict, 'comment': comment}]}
+
+    return {
+        'feedback': [{
+            'phase': 'qa',
+            'verdict': verdict,
+            'comment': comment
+        }]
+    }
 
 
 def hitl_deploy(state: SDLCState) -> dict:
@@ -190,13 +204,12 @@ def route_after_hitl_developer(state: SDLCState) -> str:
 
 
 def route_after_code_review(state: SDLCState) -> str:
-    """Go to human review when review passes OR retries are exhausted;
-    otherwise loop back to developer automatically."""
     review = state.get('code_review') or {}
-    if review.get('passed'):
+    retries = state.get('review_retries', 0)
+
+    if review.get('passed') or retries >= settings.MAX_REVIEW_RETRIES:
         return 'hitl_review'
-    if state.get('review_retries', 0) >= settings.MAX_REVIEW_RETRIES:
-        return 'hitl_review'
+
     return 'developer'
 
 
@@ -205,13 +218,15 @@ def route_after_hitl_review(state: SDLCState) -> str:
 
 
 def route_after_qa(state: SDLCState) -> str:
-    """Always surface QA result to a human before proceeding (on pass or at
-    retry limit). Only auto-loop back to developer when retries remain."""
     report = state.get('test_report') or {}
+    retries = state.get('qa_retries', 0)
+
     if report.get('status') == 'pass':
         return 'hitl_qa'
-    if state.get('qa_retries', 0) >= settings.MAX_QA_RETRIES:
+
+    if retries >= settings.MAX_QA_RETRIES:
         return 'hitl_qa'
+
     return 'developer'
 
 

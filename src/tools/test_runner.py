@@ -49,12 +49,14 @@ class TestRunner:
         output = (result.stdout or "") + "\n" + (result.stderr or "")
         passed,failed = self._parse_counts(output)
 
-        if result.returncode == 0:
+        if "ERROR" in output:
+            status = TestStatus.ERROR
+
+        elif result.returncode == 0:
             status = TestStatus.PASS
         
         elif failed > 0:
             status = TestStatus.FAIL
-        
         else:
             status = TestStatus.ERROR
 
@@ -83,10 +85,13 @@ class TestRunner:
     def _parse_counts(output: str) -> tuple[int,int]:
         import re
         passed, failed = 0, 0
-        m = re.search(r"(\d+) passed", output)
-        if m: passed = int(m.group(1))
-        m = re.search(r"(\d+) failed", output)
-        if m: failed = int(m.group(1))
-        return passed, failed
+        
+        m1 = re.search(r"(\d+)\s+passed",output)
+        if m1: 
+            passed = int(m1.group(1))
 
+        m2 = re.search(r"(\d+)\s+failed",output)
+        if m2:
+            failed = int(m2.group(1))
+        return passed,failed 
         

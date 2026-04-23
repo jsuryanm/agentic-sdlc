@@ -4,6 +4,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.logger.custom_logger import logger
 from src.pipelines.state import SDLCState
+from src.memory.recall import recall_for_developer,recall_for_qa
+
 
 _SUMMARY_SYSTEM = (
     "You are a project historian. Produce a TERSE summary (max 150 words) of "
@@ -40,18 +42,52 @@ class ContextManager:
             qa_feedback = "\n".join(errors[:3])[:2000]
 
         review = state.get("code_review") or {}
-        review_feedback = "none"
-        if review and not review.get("passed", True):
-            fixes = review.get("required_fixes", [])
-            review_feedback = "\n".join(f"- {f}" for f in fixes[:10])[:2000]
+        review_feedback = "none" 
+        
+        if review and not review.get('passed',True):
+            issues = review.get("issues",[])
+            priority_order = {"high":0,"medium":1,"low":2}
+
+            sorted_issues = sorted(issues,
+                                   key=lambda i: priority_order.get(i.get("severity","medium"),1))
+            
+            structured = []
+
+            for i in sorted_issues:
+                file = i.get("file","unknown")
+                line = i.get("line",1)
+                msg = i.get("message","")
+                structured.append(f"{file}:{line} -> {msg}")
+
+            review_feedback = "Fix ALL of the following issues:\n" + "\n".join(structured[:30]) 
+
+        requirements_summary = ContextManager._summarize_reqs(state.get("requirements"))
+        stack = (state.get("architecture") or {}).get("stack",[])
+
+        past_fixes = recall_for_developer(requirements_summary,stack)
+        qa_errors = (state.get("test_report") or {}).get("errors",[])
+        if qa_errors:
+            query = f"""
+                QA Errors:
+                {"\n".join(qa_errors[:2])}
+                
+                Context:
+                {ContextManager._summarize_reqs(state.get("requirements"))}
+            """
+            qa_memory = recall_for_qa(query)
+        else:
+            qa_memory = "none"
+        
+
 
         return {
-            "requirements_summary": ContextManager._summarize_reqs(
-                state.get("requirements")
-            ),
+            "requirements_summary": requirements_summary,
             "architecture": state.get("architecture") or {},
             "qa_feedback": qa_feedback,
             "review_feedback": review_feedback,
+            "docs_context":state.get("docs_context",""),
+            "past_fixes":past_fixes,
+            "qa_memory":qa_memory,
             "summary": state.get("context_summary") or "",
         }
 

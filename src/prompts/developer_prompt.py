@@ -51,12 +51,31 @@ DEV_PROMPT = ChatPromptTemplate.from_messages([
      '- fastapi.testclient.TestClient: if any file imports `TestClient`, '
      'requirements.txt MUST list `httpx` (TestClient delegates to httpx).\n\n'
      'Output ONLY the structured Codebase object - no prose.'),
+    
     ('human',
-     'Requirements:\n{requirements_summary}\n\n'
-     'Architecture:\n{architecture}\n\n'
-     'QA feedback from previous attempt (if any):\n{qa_feedback}\n\n'
-     'Code review feedback to address (if any):\n{review_feedback}\n\n'
-     'Retrieved documentation (authoritative):\n{docs_context}\n\n'
-     'Past lessons from similar projects:\n{past_lessons}\n\n'
-     'Generate the full codebase.')
+    'Requirements:\n{requirements_summary}\n\n'
+    'Architecture:\n{architecture}\n\n'
+
+    'QA feedback from previous attempt (if any):\n{qa_feedback}\n\n'
+
+    'Code review feedback to address (if any):\n{review_feedback}\n\n'
+
+    'Retrieved documentation (authoritative):\n{docs_context}\n\n'
+
+    '### PAST FIXES (LEARN FROM HISTORY)\n\n'
+    'You have encountered similar issues before:\n\n'
+    '{past_fixes}\n\n'
+
+    '### QA MEMORY (SIMILAR FAILURES)\n\n'
+    'Relevant past QA failures and fixes:\n\n'
+    '{qa_memory}\n\n'
+
+    'CRITICAL:\n'
+    '- You MUST reuse these fixes where applicable\n'
+    '- You MUST prioritize these over guessing\n'
+    '- You MUST NOT repeat previously seen mistakes\n'
+    '- If a similar error appears, apply the known fix directly\n\n'
+
+    'Generate the full codebase.'
+    )
 ])

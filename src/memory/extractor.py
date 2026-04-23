@@ -24,43 +24,77 @@ class _LessonBundle(BaseModel):
     )
 
 _EXTRACTOR_SYSTEM = (
-    "You are a software project post-mortem analyst. Given a completed project "
-    "run (requirements, architecture, test outcome, human feedback), distill "
-    "2-5 lessons that might help FUTURE similar projects. "
-    "\n\n"
-    "Rules for good lessons:\n"
-    "  - Be GENERIC, not specific to this project's details\n"
-    "  - Prefer patterns ('X tends to fail when Y') over facts ('X failed')\n"
-    "  - Cover multiple categories: architecture, code, qa, feedback\n"
-    "  - Skip boring/trivial observations\n"
-    "  - If the run failed, lessons should be about what to AVOID\n"
-    "  - If the run succeeded, lessons should be about what WORKED"
+    "You are a senior software engineer performing a post-mortem on an automated SDLC run.\n\n"
+
+    "Your goal is to extract 2–5 HIGH-VALUE lessons that help future agents FIX similar issues.\n\n"
+
+    "IMPORTANT:\n"
+    "- Lessons must be GENERALIZABLE but also ACTIONABLE\n"
+    "- Each lesson should describe:\n"
+    "    (1) the failure pattern\n"
+    "    (2) the root cause\n"
+    "    (3) the concrete fix\n\n"
+
+    "GOOD examples:\n"
+    "- 'Pytest fixture errors occur when fixtures are not passed as function arguments → fix by adding the fixture parameter explicitly.'\n"
+    "- 'ModuleNotFoundError happens when dependencies are missing → fix by adding the package to requirements.txt.'\n"
+    "- 'FastAPI response validation fails when response_model mismatches → fix by aligning schema with returned object.'\n\n"
+
+    "BAD examples:\n"
+    "- 'Tests failed'\n"
+    "- 'There were errors in the code'\n"
+    "- 'Fix the bug'\n\n"
+
+    "Rules:\n"
+    "- Be concise (1–2 sentences per lesson)\n"
+    "- Prefer patterns over one-off facts\n"
+    "- Include concrete fixes (what to change)\n"
+    "- Focus on issues that are likely to repeat\n"
+    "- Cover multiple categories when possible (architecture, code, qa, feedback)\n\n"
+
+    "If the run failed:\n"
+    "- Focus on what to AVOID and how to FIX it\n\n"
+
+    "If the run succeeded:\n"
+    "- Focus on what WORKED and why\n\n"
+
+    "Output only structured lessons."
 )
 
 def extract_lessons(
         thread_id: str,
-        final_state: Dict[str,Any],
+        final_state: Dict[str, Any],
         outcome: str
 ) -> List[Lesson]:
     log = logger.bind(agent='extractor')
 
     summary_parts = []
+
     if reqs := final_state.get('requirements'):
-        summary_parts.append(f'Requirements: {reqs.get('summary', '')[:300]}')
+        summary_parts.append(
+            f"Requirements: {reqs.get('summary', '')[:300]}"
+        )
+
     if arch := final_state.get('architecture'):
         summary_parts.append(
-            f'Stack: {arch.get('stack')}, '
-            f'Files: {len(arch.get('files',[]))}'
+            f"Stack: {arch.get('stack')}, "
+            f"Files: {len(arch.get('files', []))}"
         )
+
     if report := final_state.get('test_report'):
+        errors = report.get("errors", [])[:3]
+
         summary_parts.append(
-            f'Tests: {report.get('status')} '
-            f'(retries: {final_state.get('qa_retries', 0)}'
+            f"Test status: {report.get('status')}\n"
+            f"Errors:\n" + "\n".join(errors)
         )
+
     if feedback := final_state.get('feedback'):
         comments = [f.get('comment', '') for f in feedback if f.get('comment')]
         if comments:
-            summary_parts.append(f'Human feedback: {'; '.join(comments[:3])}')
+            summary_parts.append(
+                f"Human feedback: {'; '.join(comments[:3])}"
+            )
 
     run_summary = '\n'.join(summary_parts)
 
@@ -69,23 +103,40 @@ def extract_lessons(
         bundle: _LessonBundle = llm.invoke([
             SystemMessage(content=_EXTRACTOR_SYSTEM),
             HumanMessage(content=(
-                f'Outcome: {outcome}\n\n'
-                f'Run summary:\n{run_summary}\n\n'
-                f'Extract lessons'
+                f"Outcome: {outcome}\n\n"
+                f"Run summary:\n{run_summary}\n\n"
+                f"Extract lessons"
             ))
         ])
     except Exception as e:
         log.warning(f'Lesson extraction failed (continuing): {e}')
         return []
-    
-    lessons = [
-        Lesson(
-            thread_id=thread_id,
-            category=ext.category,
-            content=ext.content,
-            outcome=outcome
+
+    lessons = []
+
+    for ext in bundle.lessons:
+        content = ext.content.strip().lower()
+
+        # --- classify ---
+        if "fixture" in content:
+            tag = "[PYTEST_FIX]"
+        elif "import" in content or "module not found" in content:
+            tag = "[IMPORT_FIX]"
+        elif "dependency" in content or "requirements" in content:
+            tag = "[DEPENDENCY_FIX]"
+        elif "assert" in content or "test" in content:
+            tag = "[TEST_FIX]"
+        else:
+            tag = "[GENERAL_FIX]"
+
+        lessons.append(
+            Lesson(
+                thread_id=thread_id,
+                category=ext.category,
+                content=f"{tag} {ext.content.strip()}",
+                outcome=outcome
+            )
         )
-        for ext in bundle.lessons
-    ]
+
     log.info(f'Extracted {len(lessons)} lessons from run {thread_id}')
     return lessons

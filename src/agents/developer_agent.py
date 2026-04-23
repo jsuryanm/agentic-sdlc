@@ -52,18 +52,19 @@ class DeveloperAgent(BaseAgent):
                 'status': 'developer_failed',
             }
 
-        past_lessons = recall_for_developer(
-            requirements_summary=projection['requirements_summary'],
-            stack=stack,
-        )
+        # past_lessons = recall_for_developer(
+        #     requirements_summary=projection['requirements_summary'],
+        #     stack=stack,
+        # )
 
         result: Codebase = self._chain.invoke({
             'requirements_summary': projection['requirements_summary'],
-            'architecture': arch,
+            'architecture': projection.get("architecture"),
             'qa_feedback': projection.get('qa_feedback', 'none'),
             'review_feedback': projection.get('review_feedback', 'none'),
             'docs_context': docs_context,
-            'past_lessons': past_lessons,
+            'past_fixes': projection.get("past_fixes","none"),
+            "qa_memory":projection.get("qa_memory","none")
         })
 
         pinned_versions = self._extract_pinned_versions(docs_context)

@@ -35,7 +35,11 @@ def recall_for_architect(requirements_summary: str) -> str:
 
 def recall_for_developer(requirements_summary: str, stack: list[str]) -> str:
     stack_str = ', '.join(stack)
-    query = f'{requirements_summary} stack: {stack_str}'
+    query = f"""
+        Requirements: {requirements_summary}
+        Stack: {stack_str}
+        Common errors: pytest, import, dependency, fixture
+    """
     return _format(_safe_search(query, category='code'))
 
 
