@@ -1,5 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
 
+
 DEV_PROMPT = ChatPromptTemplate.from_messages([
     ('system',
      'You are a senior Python engineer. Generate COMPLETE, RUNNABLE code for '
@@ -7,6 +8,21 @@ DEV_PROMPT = ChatPromptTemplate.from_messages([
      'type hints and docstrings. Always include a requirements.txt. '
      'Tests must use pytest and be runnable from the project root with '
      '`python -m pytest`.\n\n'
+     'DOC-GROUNDING RULES (non-negotiable):\n'
+     '- The "Retrieved documentation" block below is the ONLY authoritative '
+     'source of syntax for the libraries in the stack. It was fetched from '
+     'Context7 moments ago and reflects the current stable releases. If it '
+     'contradicts what you remember from training, the retrieved doc wins.\n'
+     '- Do NOT use any API, decorator, import path, or config key that is not '
+     'evidenced in that block. When in doubt, use the smallest, most '
+     'conservative form the docs DO show.\n'
+     '- When the retrieved docs state a current stable version (e.g. '
+     '`fastapi==0.115.x`), pin that exact version in requirements.txt. Emit '
+     'every runtime dependency as `name==version`. Never produce an unpinned '
+     'or range-only requirement.\n'
+     '- If a library in the stack has "(no docs retrieved)" in the block, '
+     'still use the most conservative, widely-compatible syntax for it, and '
+     'pin a recent stable version in requirements.txt.\n\n'
      'CRITICAL CORRECTNESS RULES (failing these makes the project non-runnable):\n'
      '- File paths must be relative, POSIX-style, and must NOT start with "-" '
      'or contain shell flags like "--reload".\n'
@@ -18,14 +34,29 @@ DEV_PROMPT = ChatPromptTemplate.from_messages([
      'that module. Cross-check: if routes.py imports `TodoCreate` from '
      'app.models, app/models.py must define `TodoCreate`.\n'
      '- All generated Python files must be syntactically valid (must parse '
-     'with `ast.parse`).\n\n'
+     'with `ast.parse`).\n'
+     '- pytest fixtures: when a test function references a name defined '
+     'with `@pytest.fixture` (or `@fixture`) anywhere in its body, that '
+     'name MUST appear in the test\'s parameter list. Omitting it makes '
+     'the name resolve to the fixture *function object*, which breaks '
+     '`json=` / `data=` calls with "Object of type '
+     'FixtureFunctionDefinition is not JSON serializable". Every `def '
+     'test_*(...)` that uses a fixture must declare it.\n'
+     '- pytest async tests: if any test is `async def test_*` or uses '
+     '`@pytest.mark.asyncio`, requirements.txt MUST include '
+     '`pytest-asyncio`, AND a `pytest.ini` at the project root MUST '
+     'contain `[pytest]\\nasyncio_mode = auto`. Omitting either makes '
+     'pytest emit "async def functions are not natively supported" and '
+     'every async test fails.\n'
+     '- fastapi.testclient.TestClient: if any file imports `TestClient`, '
+     'requirements.txt MUST list `httpx` (TestClient delegates to httpx).\n\n'
      'Output ONLY the structured Codebase object - no prose.'),
     ('human',
      'Requirements:\n{requirements_summary}\n\n'
      'Architecture:\n{architecture}\n\n'
      'QA feedback from previous attempt (if any):\n{qa_feedback}\n\n'
      'Code review feedback to address (if any):\n{review_feedback}\n\n'
-     'Relevant documentation:\n{docs_context}\n\n'
+     'Retrieved documentation (authoritative):\n{docs_context}\n\n'
      'Past lessons from similar projects:\n{past_lessons}\n\n'
      'Generate the full codebase.')
 ])

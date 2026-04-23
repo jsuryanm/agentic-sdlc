@@ -64,11 +64,13 @@ class ContextManager:
             {"path": f.get("path", ""), "content": (f.get("content", "") or "")[:4000]}
             for f in files
         ]
+        architecture = state.get("architecture") or {}
         return {
             "requirements_summary": ContextManager._summarize_reqs(
                 state.get("requirements")
             ),
-            "architecture": state.get("architecture") or {},
+            "architecture": architecture,
+            "stack": architecture.get("stack", []) or [],
             "files": trimmed,
             "retry_attempt": state.get("review_retries", 0),
             "summary": state.get("context_summary") or "",

@@ -1,14 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from typing import Optional
 
-class TodoCreate(BaseModel):
+class TodoItem(BaseModel):
+    id: Optional[int] = None
     title: str
     description: Optional[str] = None
-
-class TodoResponse(BaseModel):
-    id: int
-    title: str
-    description: Optional[str] = None
-    completed: bool
-
-    model_config = ConfigDict(from_attributes=True)
+    completed: bool = False

@@ -25,12 +25,14 @@ class Config(BaseSettings):
     # Code review loop
     MAX_REVIEW_RETRIES: int = 2
 
-    # Retrieval / RAG
-    TAVILY_API_KEY: Optional[str] = None
-    TAVILY_MCP_URL: str = Field(default="https://api.tavily.com")
-    USE_AGENTIC_RAG: bool = False
-    AGENTIC_RAG_MAX_ITERATIONS: int = 2
-    RAG_CHUNKS_PER_QUERY: int = 4
+    # Context7 MCP — doc source for code generation + review
+    USE_CONTEXT7: bool = True
+    CONTEXT7_MCP_COMMAND: str = "npx"
+    CONTEXT7_MCP_ARGS: list[str] = Field(
+        default_factory=lambda: ["-y", "@upstash/context7-mcp"]
+    )
+    CONTEXT7_API_KEY: Optional[str] = None
+    CONTEXT7_DOC_TOKENS: int = 4000
 
     # API
     API_HOST: str = "0.0.0.0"

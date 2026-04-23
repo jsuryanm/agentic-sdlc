@@ -4,11 +4,23 @@ from typing import List, Optional
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_openai import OpenAIEmbeddings
 
 from src.core.config import settings
-from src.knowledge.store import _embeddings
 from src.logger.custom_logger import logger
 from src.memory.models import Lesson, RunRecord
+
+_EMBEDDINGS: Optional[OpenAIEmbeddings] = None
+
+
+def _embeddings() -> OpenAIEmbeddings:
+    global _EMBEDDINGS
+    if _EMBEDDINGS is None:
+        _EMBEDDINGS = OpenAIEmbeddings(
+            model=settings.OPENAI_EMBEDDINGS_MODEL,
+            api_key=settings.OPENAI_API_KEY,
+        )
+    return _EMBEDDINGS
 
 
 class LongTermMemory:

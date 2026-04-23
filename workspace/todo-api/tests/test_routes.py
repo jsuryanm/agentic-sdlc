@@ -6,15 +6,12 @@ client = TestClient(app)
 
 @pytest.fixture
 def todo_data():
-    return {
-        "title": "Test Todo",
-        "description": "This is a test todo item."
-    }
+    return {"title": "Test Todo", "description": "Test Description", "completed": False}
 
 def test_create_todo(todo_data):
     response = client.post("/todos/", json=todo_data)
     assert response.status_code == 200
-    assert "id" in response.json()
+    assert response.json()["title"] == todo_data["title"]
 
 
 def test_read_todos():
@@ -23,22 +20,29 @@ def test_read_todos():
     assert isinstance(response.json(), list)
 
 
+def test_read_todo():
+    response = client.post("/todos/", json=todo_data)
+    todo_id = response.json()["id"]
+    response = client.get(f"/todos/{todo_id}")
+    assert response.status_code == 200
+    assert response.json()["id"] == todo_id
+
+
 def test_update_todo(todo_data):
-    create_response = client.post("/todos/", json=todo_data)
-    todo_id = create_response.json()["id"]
-    updated_data = {"title": "Updated Todo", "description": "Updated description."}
+    response = client.post("/todos/", json=todo_data)
+    todo_id = response.json()["id"]
+    updated_data = {"title": "Updated Todo", "description": "Updated Description", "completed": True}
     response = client.put(f"/todos/{todo_id}", json=updated_data)
     assert response.status_code == 200
-    assert response.json()["title"] == "Updated Todo"
+    assert response.json()["title"] == updated_data["title"]
 
 
 def test_delete_todo():
-    create_response = client.post("/todos/", json={"title": "Todo to delete"})
-    todo_id = create_response.json()["id"]
+    response = client.post("/todos/", json=todo_data)
+    todo_id = response.json()["id"]
     response = client.delete(f"/todos/{todo_id}")
     assert response.status_code == 200
-    assert response.json()["detail"] == "Todo deleted successfully"
+    assert response.json()["detail"] == "Todo deleted"
 
-    # Verify deletion
     response = client.get(f"/todos/{todo_id}")
     assert response.status_code == 404

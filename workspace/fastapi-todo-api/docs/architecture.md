@@ -1,38 +1,34 @@
 # Architecture Report - fastapi-todo-api
 
 ## Purpose
-This document outlines the architectural decisions and components of the fastapi-todo-api project, detailing the technologies used and the current state of implementation.
+This document outlines the architectural decisions and components for the fastapi-todo-api project, which aims to provide a high-performance API for managing to-do items.
 
 ## Inputs
-- Project requirements for a to-do API.
-- Selection of technology stack: FastAPI, Pydantic, pytest.
-- Initial design of API endpoints and data models.
+- Requirements for a RESTful API
+- Selection of technology stack: FastAPI, Pydantic, pytest
+- Initial project structure and file organization
 
 ## Outputs
-- Defined architecture for the fastapi-todo-api.
-- Developed components including:
+- Established architecture using FastAPI
+- Defined components and their purposes:
   - API
-  - Data Models
-  - CRUD Operations
-  - Testing framework
-- Five implemented files:
-  - `app/main.py`: Entry point for the FastAPI application.
-  - `app/models.py`: Pydantic models for TODO items.
-  - `app/routes.py`: CRUD operations for TODO items.
-  - `app/database.py`: In-memory storage for TODO items.
-  - `tests/test_main.py`: Unit tests for the FastAPI application.
+  - Data Model
+  - In-memory Storage
+  - Tests
+- Five implemented files with specific roles in the application
 
 ## Key decisions
-- Adoption of FastAPI for its asynchronous capabilities and performance.
+- Adoption of FastAPI for its asynchronous capabilities to enhance performance.
 - Use of Pydantic for data validation to ensure data integrity.
-- Selection of pytest as the testing framework for its simplicity and effectiveness.
+- Maintenance of a RESTful architecture to facilitate scalability and ease of maintenance.
 
 ## Risks and open questions
-- Unresolved decisions regarding the database choice, which could impact scalability and performance.
-- Need to finalize authentication mechanisms to ensure security and user management.
-- Potential integration issues with chosen technologies if not properly aligned.
+- Finalization of the database schema is pending, which may impact data management and API functionality.
+- Selection of appropriate authentication methods for user access remains unresolved, posing potential security risks.
+- Ongoing discussions are needed to address these challenges and ensure robust API functionality.
 
 ## Next steps
-- Discuss and finalize the database solution to support persistent storage.
-- Define and implement authentication strategies for user management.
-- Continue development of remaining components and integration testing to ensure functionality and performance.
+- Finalize the database schema and integrate it into the architecture.
+- Evaluate and select authentication methods for securing user access.
+- Continue development of remaining components and enhance testing coverage.
+- Monitor ongoing discussions to resolve open issues and adapt the architecture as necessary.

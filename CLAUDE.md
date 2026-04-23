@@ -34,7 +34,7 @@ src/
 ├── core/config.py  # pydantic-settings BaseSettings — reads .env
 ├── dashboard/      # Streamlit app (single file: streamlit_app.py)
 ├── exceptions/     # Custom exception hierarchy
-├── knowledge/      # Agentic RAG: Tavily ingest, Chroma store, retriever
+├── tools/mcp_client.py  # Context7 MCP client for library-doc retrieval + GitHub MCP
 ├── logger/         # Loguru setup; use logger.bind(agent=name) everywhere
 ├── memory/         # Long-term memory (per-project episodic recall)
 ├── models/schemas.py  # All Pydantic models (Requirements, Architecture, Codebase, ...)
@@ -161,9 +161,9 @@ The graph is built once on FastAPI startup (`deps.startup()`) and reused across 
 
 ---
 
-## Knowledge / RAG
+## Library documentation (Context7 MCP)
 
-`src/knowledge/` runs "agentic RAG" before code generation: Tavily web search (`tavily_client.py`, uses the official `tavily-python` async client), chunked into Chroma (`store.py`), retrieved by topic (`retriever.py`), orchestrated by `agentic_rag.py`. Requires `TAVILY_API_KEY`.
+Before code generation and code review, the pipeline fetches canonical library docs from the Context7 MCP server via `src/tools/mcp_client.py` (`fetch_docs_for_stack` / `fetch_docs_for_stack_sync`). The developer agent also runs a short tool-calling ReAct loop over the same Context7 tools (`get_context7_tools`) so the LLM can request docs on demand. Controlled by `USE_CONTEXT7` and `CONTEXT7_MCP_COMMAND` / `CONTEXT7_MCP_ARGS` in `src/core/config.py`. The server itself is launched via stdio — no daemon to keep running.
 
 ## Long-term memory
 

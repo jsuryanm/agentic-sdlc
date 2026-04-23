@@ -47,8 +47,12 @@ class DevOpsAgent(BaseAgent):
         ci_dir.mkdir(parents=True, exist_ok=True)
         (ci_dir / "ci.yml").write_text(plan.ci_yaml, encoding="utf-8")
 
-        # Static branch name for the PR
-        branch_name = "init-codebase"
+        # Per-run branch so reruns don't collide with a prior run's branch
+        # (which would make every file-create hit "already exists" and the
+        # resulting PR have zero commits).
+        thread_id = state.get("thread_id") or ""
+        suffix = (thread_id[:8] or "run").lower()
+        branch_name = f"init-codebase-{suffix}"
         pr_url = self._run_async(self._push_via_mcp(project_dir, branch_name, repo_name, reqs["project_name"]))
 
         return {
@@ -184,22 +188,54 @@ class DevOpsAgent(BaseAgent):
         return None
 
     def _extract_sha(self, res: Any, path: str) -> Optional[str]:
-        if not res: return None
+        """Dig `sha` out of whatever shape GitHub's MCP server returns.
+
+        GitHub REST wraps single-file content as `{"sha": ..., "path": ..., ...}`,
+        but MCP adapters often wrap the whole thing again as either a JSON
+        string, or a list of ``{"type": "text", "text": "<json>"}`` content
+        blocks. We handle all three plus directory-listing (list of entries).
+        """
+        if not res:
+            return None
+
+        # MCP content-block list: [{"type": "text", "text": "<json>"}, ...]
+        if isinstance(res, list) and res and all(
+            isinstance(x, dict) and 'text' in x for x in res
+        ):
+            merged = '\n'.join(x.get('text', '') for x in res)
+            try:
+                return self._extract_sha(json.loads(merged), path)
+            except Exception:
+                match = re.search(r'"sha"\s*:\s*"([0-9a-f]{7,40})"', merged)
+                return match.group(1) if match else None
+
         if isinstance(res, str):
-            try: res = json.loads(res)
-            except: return None
+            try:
+                return self._extract_sha(json.loads(res), path)
+            except Exception:
+                match = re.search(r'"sha"\s*:\s*"([0-9a-f]{7,40})"', res)
+                return match.group(1) if match else None
+
         if isinstance(res, dict):
-            if res.get("sha"): return res["sha"]
-            for k in ["content", "data", "item"]:
+            if res.get('sha'):
+                return res['sha']
+            for k in ('content', 'data', 'item', 'result', 'file'):
                 inner = res.get(k)
-                if isinstance(inner, (dict, list)):
+                if isinstance(inner, (dict, list, str)):
                     sha = self._extract_sha(inner, path)
-                    if sha: return sha
+                    if sha:
+                        return sha
+
         if isinstance(res, list):
             for item in res:
-                if isinstance(item, dict) and item.get("path") == path:
-                    return item.get("sha")
-        return getattr(res, "sha", None)
+                if isinstance(item, dict):
+                    if item.get('path') == path and item.get('sha'):
+                        return item['sha']
+                    sha = self._extract_sha(item, path)
+                    if sha:
+                        return sha
+
+        return getattr(res, 'sha', None)
 
     def _extract_url(self, result: Any) -> Optional[str]:
         if not result: return None

@@ -1,4 +1,4 @@
-# Use the official Python 3.11 slim image as the base image
+# Use the official Python 3.11 slim image as a base
 FROM python:3.11-slim
 
 # Set the working directory in the container
@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 8000
 
 # Command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -1,30 +1,37 @@
+# Architecture Report - todo-api
+
 ## Purpose
-This document outlines the architectural decisions and components for the todo-api project, which utilizes FastAPI, Pydantic, and pytest.
+This document outlines the architectural decisions and components for the todo-api project, which is being developed using FastAPI, Pydantic, and pytest. It serves as a guide for the current state of the architecture and highlights key decisions made during this phase.
 
 ## Inputs
-- Project requirements for a todo API.
-- Selection of technology stack: FastAPI, Pydantic, pytest.
+- Project requirements for a todo API
+- Previous technology stack (Node.js and MongoDB)
+- Selected technologies: FastAPI, Pydantic, pytest
 
 ## Outputs
-- Six foundational files created for the API architecture:
+- Defined architecture components:
+  - API
+  - Data Model
+  - In-memory Storage
+  - Tests
+- Five foundational files created:
   - `app/main.py`: Entry point for the FastAPI application.
   - `app/models.py`: Pydantic models for TODO items.
-  - `app/routes.py`: API routes for CRUD operations on TODO items.
-  - `app/storage.py`: In-memory storage implementation for TODO items.
-  - `app/exceptions.py`: Custom exception handling for the API.
-  - `tests/test_routes.py`: Unit tests for the API routes.
+  - `app/routes.py`: FastAPI routes for CRUD operations on TODO items.
+  - `app/storage.py`: In-memory storage for TODO items.
+  - `tests/test_routes.py`: Unit tests for the FastAPI routes.
+- Entry point command: `uvicorn app.main:app --reload`
 
 ## Key decisions
 - Adoption of FastAPI for its performance and ease of use.
-- Use of Pydantic for data validation of API inputs.
-- Prioritization of testing with pytest to ensure code reliability.
+- Use of Pydantic for enhanced data validation and handling.
 
 ## Risks and open questions
-- Implementation of user authentication is still an open issue.
-- Development of a robust error handling framework is pending.
-- Integration of third-party services for notifications and task reminders needs further discussion.
+- Unresolved issues regarding user authentication methods.
+- Need for a robust error handling strategy is still under discussion.
+- The necessity of real-time updates is debated, which may affect future design choices and resource allocation.
 
 ## Next steps
-- Finalize requirements for user authentication and error handling.
-- Continue discussions on third-party service integrations.
-- Begin development of the identified components and implement unit tests for new features.
+- Finalize decisions on user authentication and error handling strategies.
+- Evaluate the implications of real-time updates on architecture.
+- Continue development and testing of the API components to ensure functionality and performance.

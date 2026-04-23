@@ -80,9 +80,22 @@ def hitl_developer(state: SDLCState) -> dict:
 
 def hitl_review(state: SDLCState) -> dict:
     review = state.get('code_review') or {}
+    issues_formatted = []
+    for issue in (review.get('issues') or []):
+        if isinstance(issue, dict):
+            where = issue.get('file') or '?'
+            line = issue.get('line')
+            if line:
+                where = f'{where}:{line}'
+            severity = (issue.get('severity') or 'medium').upper()
+            issues_formatted.append(
+                f'[{severity}] {where} — {issue.get("message", "")}'
+            )
+        else:
+            issues_formatted.append(str(issue))
     preview = {
         'passed': review.get('passed'),
-        'issues': review.get('issues') or [],
+        'issues': issues_formatted,
         'required_fixes': review.get('required_fixes') or [],
         'review_retries': state.get('review_retries', 0),
     }
@@ -137,8 +150,9 @@ def hitl_qa(state: SDLCState) -> dict:
 def hitl_deploy(state: SDLCState) -> dict:
     codebase = state.get('codebase') or {}
     test_report = state.get('test_report') or {}
+    requirements = state.get('requirements') or {}
     preview = {
-        'project_name': codebase.get('project_name'),
+        'project_name': requirements.get('project_name'),
         'project_dir': codebase.get('project_dir'),
         'files': [f.get('path') for f in (codebase.get('files') or [])],
         'test_status': test_report.get('status'),
