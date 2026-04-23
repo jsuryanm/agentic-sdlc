@@ -1,41 +1,36 @@
-from app.models import Todo, TodoCreate, TodoUpdate
-from typing import List, Optional
+from app.models import TodoCreate, TodoResponse
+from typing import List, Dict, Optional
 
 class InMemoryStorage:
     def __init__(self):
-        self.todos = []
+        self.todos: Dict[int, TodoResponse] = {}
         self.counter = 1
 
-    def create(self, todo_create: TodoCreate) -> Todo:
-        todo = Todo(id=self.counter, **todo_create.dict())
-        self.todos.append(todo)
+    def create(self, todo: TodoCreate) -> TodoResponse:
+        todo_response = TodoResponse(
+            id=self.counter,
+            title=todo.title,
+            description=todo.description,
+            completed=False,
+        )
+        self.todos[self.counter] = todo_response
         self.counter += 1
-        return todo
+        return todo_response
 
-    def get_all(self) -> List[Todo]:
-        return self.todos
+    def get_all(self) -> List[TodoResponse]:
+        return list(self.todos.values())
 
-    def get(self, todo_id: int) -> Optional[Todo]:
-        for todo in self.todos:
-            if todo.id == todo_id:
-                return todo
-        return None
-
-    def update(self, todo_id: int, todo_update: TodoUpdate) -> Optional[Todo]:
-        todo = self.get(todo_id)
-        if todo:
-            updated_data = todo.dict()
-            updated_data.update(todo_update.dict(exclude_unset=True))
-            updated_todo = Todo(**updated_data)
-            self.todos = [updated_todo if t.id == todo_id else t for t in self.todos]
-            return updated_todo
+    def update(self, todo_id: int, todo: TodoCreate) -> Optional[TodoResponse]:
+        if todo_id in self.todos:
+            self.todos[todo_id].title = todo.title
+            self.todos[todo_id].description = todo.description
+            return self.todos[todo_id]
         return None
 
     def delete(self, todo_id: int) -> bool:
-        for index, todo in enumerate(self.todos):
-            if todo.id == todo_id:
-                del self.todos[index]
-                return True
+        if todo_id in self.todos:
+            del self.todos[todo_id]
+            return True
         return False
 
 # Initialize the in-memory storage
