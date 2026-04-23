@@ -1,41 +1,40 @@
 from typing import List, Optional
-from app.models import TodoItem, TodoCreate
+from app.models import TodoItem, TodoCreate, TodoUpdate
 
 class TodoStorage:
     def __init__(self):
         self.todos = []
         self.counter = 1
 
-    def create_todo(self, todo: TodoCreate) -> TodoItem:
-        new_todo = TodoItem(id=self.counter, **todo.dict())
-        self.todos.append(new_todo)
+    def create(self, todo: TodoCreate) -> TodoItem:
+        todo_item = TodoItem(id=self.counter, **todo.dict())
+        self.todos.append(todo_item)
         self.counter += 1
-        return new_todo
+        return todo_item
 
-    def get_all_todos(self) -> List[TodoItem]:
+    def get_all(self) -> List[TodoItem]:
         return self.todos
 
-    def get_todo(self, todo_id: int) -> Optional[TodoItem]:
-        for todo in self.todos:
-            if todo.id == todo_id:
-                return todo
+    def get(self, todo_id: int) -> Optional[TodoItem]:
+        return next((todo for todo in self.todos if todo.id == todo_id), None)
+
+    def update(self, todo_id: int, todo_update: TodoUpdate) -> Optional[TodoItem]:
+        todo = self.get(todo_id)
+        if todo:
+            updated_data = todo.dict()
+            updated_data.update(todo_update.dict(exclude_unset=True))
+            updated_todo = TodoItem(**updated_data)
+            self.todos = [updated_todo if t.id == todo_id else t for t in self.todos]
+            return updated_todo
         return None
 
-    def update_todo(self, todo_id: int, todo: TodoCreate) -> Optional[TodoItem]:
-        for index, existing_todo in enumerate(self.todos):
-            if existing_todo.id == todo_id:
-                updated_todo = existing_todo.copy(update=todo.dict())
-                self.todos[index] = updated_todo
-                return updated_todo
+    def delete(self, todo_id: int) -> Optional[TodoItem]:
+        todo = self.get(todo_id)
+        if todo:
+            self.todos = [t for t in self.todos if t.id != todo_id]
+            return todo
         return None
 
-    def delete_todo(self, todo_id: int) -> bool:
-        for index, existing_todo in enumerate(self.todos):
-            if existing_todo.id == todo_id:
-                del self.todos[index]
-                return True
-        return False
-
-# Instantiate the storage
+# Create a singleton instance of TodoStorage
 
 todo_storage = TodoStorage()
