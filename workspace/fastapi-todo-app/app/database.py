@@ -1,1 +1,3 @@
-fake_db = []  # Simulating an in-memory database
+# In-memory database simulation
+
+db = []
