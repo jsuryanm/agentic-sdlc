@@ -1,163 +1,197 @@
 # Agentic SDLC
 
-Turn a one-sentence idea into a working codebase with tests, docs, Docker, CI, and a GitHub PR — with a human in the loop at the moments that matter.
+Agentic SDLC is a local-first platform that turns a software idea into a structured delivery flow: requirements, architecture, code, tests, documentation, and deployment assets. It adds human approval at the important checkpoints so you stay in control instead of handing everything over to automation.
 
-Built on **LangGraph**, **FastAPI**, **Streamlit**, **OpenAI**, and **Chroma** for retrieval-augmented generation.
+This project is built for people who want to try an AI-assisted software delivery workflow on their own machine, even if they are not deeply technical.
 
----
+![SDLC Graph](sdlc_graph.png)
 
-## Pipeline
+## What This Project Does
 
-```
-idea
-  └─> requirements ─┐
-                    ├─[HITL]─ approve ─┐
-                    │                  │
-                    └─[HITL]─ reject ──┘ (loop)
-                                        │
-                                        ▼
-                               architecture ─┐
-                                             ├─[HITL]─ approve ─┐
-                                             └─[HITL]─ reject ──┘ (loop)
-                                                                │
-                                                                ▼
-                                   developer ── code review ── (retry on fail)
-                                                                │
-                                                                ▼
-                                                               qa ── (retry on fail)
-                                                                │
-                                                                ▼
-                                                       [HITL deploy]
-                                                                │
-                                                     approve ──┼── reject → back to qa
-                                                                ▼
-                                                              devops
-                                                                │
-                                                                ▼
-                                                          Dockerfile, CI, GitHub PR
-```
+You give the system a product idea in plain language. The platform then moves through a full software delivery pipeline:
 
-At every stage the agent emits a structured artifact (Pydantic model) and writes a phase report as both Markdown and PDF under `workspace/<project>/docs/`.
+1. It turns your idea into requirements.
+2. It designs a proposed architecture.
+3. It generates a codebase and tests.
+4. It reviews the generated code.
+5. It runs QA checks.
+6. It prepares deployment files and can open a GitHub pull request.
 
----
+At several points, the system pauses and asks for human approval before it continues.
 
-## Components
+## Why It Matters
 
-| Layer | What it does |
-|-------|--------------|
-| **API** (`src/api`) | FastAPI app, lifespan-managed graph singleton, REST routes for start / resume / state / rewind |
-| **Dashboard** (`src/dashboard`) | Streamlit UI: start runs, show the current HITL prompt, approve / reject with feedback |
-| **Graph** (`src/pipelines/graph.py`) | LangGraph node + edge definitions, conditional routing, interrupt-based HITL |
-| **Agents** (`src/agents`) | Requirements, Architect, Developer, CodeReviewer, QA, DevOps, Doc (one instance per phase) |
-| **A2A bus** (`src/a2a`) | SQLite-backed agent-to-agent message bus with typed agent cards |
-| **Knowledge / RAG** (`src/knowledge`) | Tavily web search, Chroma vector store, topic-scoped retrieval before codegen |
-| **Memory** (`src/memory`) | Per-project episodic long-term memory |
-| **Tools** (`src/tools`) | `LLMFactory`, `TestRunner` (pytest in the generated project), `GitHubMCPClient` |
+Many AI coding demos stop at "generate some code." This project goes further. It tries to model the real software delivery process, including reviews, test runs, documentation, and deployment handoff.
 
----
+That makes it useful for:
 
-## Quickstart
+- learning how agent-based software workflows can be structured
+- testing AI-assisted delivery pipelines locally
+- experimenting with human-in-the-loop approval flows
+- understanding how LangGraph, FastAPI, and Streamlit can work together in one product
 
-### Prerequisites
+## Quick Start
 
-- Python 3.12+
-- [`uv`](https://github.com/astral-sh/uv)
-- OpenAI API key
-- (Optional) Tavily API key — for web-retrieval-backed code generation
-- (Optional) GitHub Personal Access Token — for DevOps push + PR
+### 1. What you need
 
-### Install
+- Python 3.12 or newer
+- `uv` for dependency management
+- an OpenAI API key
+- optional: a GitHub personal access token if you want pull request creation
+- optional: a Context7 API key if you want documentation-backed code generation and review
+
+### 2. Install the project
 
 ```bash
-git clone <repo>
+git clone <your-repo-url>
 cd agentic-sdlc
 uv sync
 ```
 
-### Configure
+### 3. Configure your environment
 
-Copy `.env.example` to `.env` and fill in your values. Required: `OPENAI_API_KEY`. Everything else is optional but unlocks capabilities.
+Copy `.env.example` to `.env` and fill in the values you want to use.
 
-| Variable | Purpose |
-|----------|---------|
-| `OPENAI_API_KEY` | Chat completions for every agent |
-| `LLM_MODEL` | Override the default model (`gpt-4o-mini`) |
-| `LLM_TEMPERATURE` | Base temperature for the factory |
-| `TAVILY_API_KEY` | Enables web-retrieval RAG before codegen |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | DevOps agent pushes code + opens PRs |
-| `GITHUB_REPO_OWNER` / `GITHUB_REPO_NAME` | Target repo for the PR |
-| `MAX_QA_RETRIES` | How many times QA can loop back to Developer |
-| `MAX_REVIEW_RETRIES` | How many times the code reviewer can loop |
-| `LOG_LEVEL` | `INFO` (default) or `DEBUG` |
+Required:
 
-### Run
+- `OPENAI_API_KEY`
 
-In two terminals:
+Common optional settings:
+
+- `GITHUB_PERSONAL_ACCESS_TOKEN`
+- `GITHUB_REPO_OWNER`
+- `GITHUB_REPO_NAME`
+- `CONTEXT7_API_KEY`
+- `LLM_MODEL`
+- `LOG_LEVEL`
+
+Simple explanation of the main settings:
+
+| Variable | What it is used for |
+|---|---|
+| `OPENAI_API_KEY` | Required for the agents to generate and review content |
+| `LLM_MODEL` | Lets you choose a different OpenAI model |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | Allows the DevOps step to push files and open a pull request |
+| `GITHUB_REPO_OWNER` / `GITHUB_REPO_NAME` | Tells the project which GitHub repository to target |
+| `CONTEXT7_API_KEY` | Enables documentation-backed context for code generation and review |
+| `USE_CONTEXT7` | Turns Context7 support on or off |
+| `LOG_LEVEL` | Controls how much detail is written to logs |
+
+### 4. Start the backend API
+
+Open a terminal and run:
 
 ```bash
-# 1. API
 uvicorn src.api.app:app --reload --port 8000 --reload-dir src
+```
 
-# 2. Dashboard
+### 5. Start the dashboard
+
+Open a second terminal and run:
+
+```bash
 streamlit run src/dashboard/streamlit_app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501), type an idea in the sidebar, click **Start**, and approve or reject at each HITL gate. The API URL can be overridden with `API_BASE_URL`.
+### 6. Open the app in your browser
 
----
+Go to `http://localhost:8501`.
 
-## Output
+From there:
 
-Each run produces:
+1. Enter a software idea in the sidebar.
+2. Start a run.
+3. Review the generated output at each approval step.
+4. Approve or reject to move the pipeline forward.
 
-- `workspace/<project>/` — source files, tests, `Dockerfile`, `.github/workflows/ci.yml`
-- `workspace/<project>/docs/{requirements,architecture,developer,qa,devops}.{md,pdf}` — phase reports
-- `.checkpoints/sdlc.sqlite` — LangGraph run state (resumable by `thread_id`)
-- `logs/sdlc_run_<timestamp>.log` — structured, per-agent logs
-- A GitHub pull request on `GITHUB_REPO_OWNER/GITHUB_REPO_NAME` (if configured)
+## What Happens During a Run
 
----
+Here is the simple version of the workflow:
 
-## API cheatsheet
+- **Requirements:** the system turns your idea into a clearer list of goals and constraints.
+- **Architecture:** it proposes a technical design for the solution.
+- **Development:** it generates code, tests, and project files.
+- **Code Review:** it checks the generated code for issues.
+- **QA:** it runs `pytest` against the generated project.
+- **Deployment:** it prepares deployment files and can push the result to GitHub.
 
-```bash
-# start a run
-curl -X POST http://localhost:8000/runs \
-  -H 'content-type: application/json' \
-  -d '{"idea":"A FastAPI TODO API with CRUD and in-memory storage"}'
+The project uses a LangGraph workflow behind the scenes, while the dashboard shows progress and pauses for approval when needed.
 
-# resume a paused HITL interrupt
-curl -X POST http://localhost:8000/runs/<thread_id>/resume \
-  -H 'content-type: application/json' \
-  -d '{"verdict":"approve","comment":""}'
+## What the Project Creates
 
-# peek at current state
-curl http://localhost:8000/runs/<thread_id>/state
-```
+Each run can produce:
 
-Full route list is in `src/api/routes.py`.
+- a generated project under `workspace/<project-name>/`
+- source files and tests
+- phase-by-phase documentation in Markdown and PDF
+- test results from the QA step
+- checkpoint state in `.checkpoints/sdlc.sqlite`
+- logs in `logs/`
+- Docker and CI files for the generated project
+- a GitHub pull request if GitHub settings are configured correctly
 
----
+Typical output locations:
 
-## Tests
+| Path | What you will find there |
+|---|---|
+| `workspace/` | Generated projects and phase documents |
+| `.checkpoints/` | Workflow checkpoints, memory, and local state |
+| `logs/` | Run logs and debugging information |
+| `src/dashboard/` | Streamlit user interface |
+| `src/api/` | FastAPI backend |
+| `src/pipelines/` | Graph workflow and state management |
+| `src/agents/` | Agent implementations for each SDLC step |
 
-```bash
-pytest src/tests/
-```
+## Main Project Areas
 
-Project-level tests live in `src/tests/`; they cover graph routing, agents, and schemas. They're separate from the tests the pipeline *generates* (those live in `workspace/<project>/tests/`).
+If you want a light contributor overview, these are the parts that matter most:
 
----
+- `src/api` handles run creation, resume actions, state lookup, and rewind endpoints.
+- `src/dashboard` provides the Streamlit interface for launching runs and reviewing checkpoints.
+- `src/pipelines/graph.py` defines the LangGraph workflow and routing logic.
+- `src/agents` contains the individual agents for requirements, architecture, development, review, QA, DevOps, and docs.
+- `src/tools` contains helper utilities such as the pytest runner and supporting clients.
 
-## Documentation
+Helpful supporting docs:
 
-- [`architecture.md`](architecture.md) — system design, graph shape, state shape, data flow
-- [`agents.md`](agents.md) — reference for every agent: responsibilities, inputs, outputs, prompt, failure modes
-- [`skills.md`](skills.md) — conventions and patterns you're expected to follow when extending this repo
-- [`CLAUDE.md`](CLAUDE.md) — working notes for Claude Code / similar coding agents
+- [architecture.md](architecture.md)
+- [agents.md](agents.md)
+- [skills.md](skills.md)
 
----
+## Top 3 Current Issues for Users
+
+1. **Setup is still more complex than it should be.** You need to run two local services and manage API keys before the project becomes useful.
+2. **Generated output still needs human judgment.** The workflow is helpful, but it is not a one-click production system. Reviews and retries are part of normal use.
+3. **Some advanced features depend on external services.** GitHub PR creation and documentation-backed generation are much better when extra credentials and services are configured.
+
+## Top 3 Current Issues for Contributors
+
+1. **A few important files are doing a lot of work.** Files like `src/pipelines/graph.py` and the dashboard app are central and can become harder to maintain as the project grows.
+2. **External integrations increase maintenance cost.** OpenAI, Context7, GitHub, Streamlit, and LangGraph all move independently, so integration drift is a real engineering concern.
+3. **End-to-end validation is still the biggest long-term quality gap.** There are project tests, but the full workflow still depends heavily on real services, retries, and manual verification.
+
+## Future Improvements
+
+These are the most valuable next improvements for the project:
+
+- add a one-command local startup flow so non-technical users do not need to manage multiple terminals
+- improve first-run onboarding with a clearer setup wizard or guided environment check
+- strengthen end-to-end test coverage for the full pipeline, including pause/resume and retry behavior
+- split large workflow and UI files into smaller units to make the codebase easier to extend
+- improve generated-project evaluation so the system can measure output quality more consistently
+- make deployment targets more flexible beyond the current GitHub-centered flow
+
+## API Endpoints
+
+If you want to call the backend directly, these are the main endpoints:
+
+- `POST /runs` to start a run
+- `POST /runs/{thread_id}/resume` to approve or reject a paused step
+- `GET /runs/{thread_id}/state` to fetch the latest run state
+- `GET /runs/{thread_id}/checkpoints` to list checkpoints
+- `POST /runs/{thread_id}/rewind` to rewind a run to an earlier checkpoint
+- `GET /health` for a simple health check
 
 ## License
 
-MIT.
+MIT

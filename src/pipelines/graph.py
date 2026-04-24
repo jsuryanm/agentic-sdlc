@@ -292,3 +292,4 @@ def build_graph(checkpointer):
 def make_checkpointer():
     db_path = str(settings.CHECKPOINT_DIR / "sdlc.sqlite")
     return SqliteSaver.from_conn_string(db_path)
+
