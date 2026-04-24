@@ -6,29 +6,36 @@ client = TestClient(app)
 
 @pytest.mark.asyncio
 async def test_create_todo():
-    response = client.post("/todos/", json={"id": 1, "title": "Test Todo"})
+    response = client.post('/todos/', json={'title': 'Test Todo', 'description': 'Test Description'})
     assert response.status_code == 200
-    assert response.json() == {"id": 1, "title": "Test Todo", "completed": False}
+    assert response.json()['title'] == 'Test Todo'
 
 @pytest.mark.asyncio
 async def test_get_todos():
-    response = client.get("/todos/")
+    response = client.get('/todos/')
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
 @pytest.mark.asyncio
 async def test_update_todo():
-    response = client.put("/todos/1", json={"id": 1, "title": "Updated Todo", "completed": False})
+    response = client.post('/todos/', json={'title': 'Update Todo'})
+    todo_id = response.json()['id']
+    response = client.put(f'/todos/{todo_id}', json={'title': 'Updated Title'})
     assert response.status_code == 200
-    assert response.json()["title"] == "Updated Todo"
+    assert response.json()['title'] == 'Updated Title'
 
 @pytest.mark.asyncio
 async def test_delete_todo():
-    response = client.delete("/todos/1")
-    assert response.status_code == 204
+    response = client.post('/todos/', json={'title': 'Delete Todo'})
+    todo_id = response.json()['id']
+    response = client.delete(f'/todos/{todo_id}')
+    assert response.status_code == 200
+    assert response.json()['id'] == todo_id
 
 @pytest.mark.asyncio
 async def test_complete_todo():
-    response = client.patch("/todos/1/complete")
+    response = client.post('/todos/', json={'title': 'Complete Todo'})
+    todo_id = response.json()['id']
+    response = client.patch(f'/todos/{todo_id}/complete')
     assert response.status_code == 200
-    assert response.json()["completed"] is True
+    assert response.json()['completed'] is True

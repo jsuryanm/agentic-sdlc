@@ -11,7 +11,7 @@ from src.tools.mcp_client import fetch_docs_for_stack_sync
 
 
 class CodeReviewAgent(BaseAgent):
-    """Reviews the developer's generated code and requests fixes if needed."""
+    """Reviews generated code and requests fixes if needed."""
 
     name = 'code_review_agent'
     card = CODE_REVIEW_CARD
@@ -26,12 +26,13 @@ class CodeReviewAgent(BaseAgent):
 
     def _process(self, state: SDLCState, projection: Dict[str, Any]) -> dict:
         files = projection.get('files', [])
+
         if not files:
             review = CodeReview(
                 passed=False,
                 issues=[],
-                required_fixes=['No files were generated; regenerate the codebase.'],
-                notes='Developer produced an empty codebase.',
+                required_fixes=['No files generated'],
+                notes='Empty codebase',
             )
         else:
             def _numbered(content: str) -> str:
@@ -41,13 +42,14 @@ class CodeReviewAgent(BaseAgent):
                 )
 
             files_text = '\n\n'.join(
-                f"--- {f['path']} ---\n{_numbered(f['content'])}" for f in files
+                f"--- {f['path']} ---\n{_numbered(f['content'])}"
+                for f in files
             )
-            stack = projection.get('stack') or []
+
             try:
-                docs_context = fetch_docs_for_stack_sync(stack) or 'none'
+                docs_context = fetch_docs_for_stack_sync(projection.get('stack') or []) or 'none'
             except Exception as e:
-                self.logger.warning(f'Context7 fetch failed during review: {e}')
+                self.logger.warning(f'Docs fetch failed: {e}')
                 docs_context = 'none'
 
             review = self._chain.invoke({
@@ -58,17 +60,28 @@ class CodeReviewAgent(BaseAgent):
                 'files': files_text,
             })
 
-        retries = state.get('review_retries', 0)
+        # -------------------------
+        # HARD RETRY ENFORCEMENT
+        # -------------------------
+        prev_retries = state.get('review_retries', 0)
+
+        retries = prev_retries
         if not review.passed:
             retries += 1
 
+        retries = min(retries, 2)
+
+        locks = state.get("locks", {})
+        if retries >= 2:
+            locks["code_review"] = True
+
         self.logger.info(
-            f'Review: passed={review.passed}, '
-            f'{len(review.issues)} issues, {len(review.required_fixes)} fixes'
+            f'Review passed={review.passed}, retries={retries}'
         )
 
         return {
             'code_review': review.model_dump(mode='json'),
             'review_retries': retries,
+            'locks': locks,
             'status': 'review_passed' if review.passed else 'review_failed',
         }

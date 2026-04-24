@@ -245,7 +245,7 @@ elif st.session_state.stage == 'awaiting_hitl':
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    t1, t2 = st.tabs(["Data Preview", "Feedback Loop"])
+    t1, t2 = st.tabs(["📋 Data Preview", "Feedback Loop"])
     with t1:
         st.json(intr.get('preview', {}))
     with t2:
